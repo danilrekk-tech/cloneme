@@ -79,11 +79,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Clone Studio — Deterministic website cloning" },
-      { name: "description", content: "Paste any URL. Get clean, componentized Next.js or Vite code back in minutes." },
-      { property: "og:title", content: "Clone Studio" },
-      { property: "og:description", content: "Deterministic website cloning into real, componentized code." },
+      { name: "description", content: "Paste any URL and get clean, componentized Next.js or Vite code back in minutes. Powered by the open-source ditto engine." },
+      { property: "og:title", content: "Clone Studio — Deterministic website cloning" },
+      { property: "og:description", content: "Paste any URL and get clean, componentized Next.js or Vite code back in minutes. Powered by the open-source ditto engine." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: "Clone Studio — Deterministic website cloning" },
+      { name: "twitter:description", content: "Paste any URL and get clean, componentized Next.js or Vite code back in minutes. Powered by the open-source ditto engine." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/a222bc4a-6173-4633-8c13-31802413f20c/id-preview-bdb9a5ab--1c8b7b7e-e9a4-4006-a878-ec6ff8a2614e.lovable.app-1784109201545.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/a222bc4a-6173-4633-8c13-31802413f20c/id-preview-bdb9a5ab--1c8b7b7e-e9a4-4006-a878-ec6ff8a2614e.lovable.app-1784109201545.png" },
     ],
     links: [
       {

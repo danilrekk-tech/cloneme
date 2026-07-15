@@ -14,7 +14,7 @@ export const Route = createFileRoute("/")({
           "Paste any URL and get clean, componentized Next.js or Vite code back in minutes. Powered by the open-source ditto engine.",
       },
       { property: "og:title", content: "Clone Studio — Deterministic website cloning" },
-      { property: "og:description", content: "Turn any website into clean, componentized code in minutes." },
+      { property: "og:description", content: "Paste any URL and get clean, componentized Next.js or Vite code back in minutes. Powered by the open-source ditto engine." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
