@@ -14,7 +14,54 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      clone_jobs: {
+        Row: {
+          created_at: string
+          ditto_job_id: string | null
+          error: string | null
+          framework: string
+          id: string
+          last_event: Json | null
+          mode: string
+          result: Json | null
+          source_url: string
+          status: string
+          styling: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          ditto_job_id?: string | null
+          error?: string | null
+          framework?: string
+          id?: string
+          last_event?: Json | null
+          mode?: string
+          result?: Json | null
+          source_url: string
+          status?: string
+          styling?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          ditto_job_id?: string | null
+          error?: string | null
+          framework?: string
+          id?: string
+          last_event?: Json | null
+          mode?: string
+          result?: Json | null
+          source_url?: string
+          status?: string
+          styling?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
