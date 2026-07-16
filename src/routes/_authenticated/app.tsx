@@ -212,7 +212,13 @@ function AppPage() {
           ) : (
             <div className="space-y-3">
               {jobs.map((j) => (
-                <JobRow key={j.id} job={j} onRefresh={() => refreshMut.mutate(j.id)} refreshing={refreshMut.isPending && refreshMut.variables === j.id} />
+                <JobRow
+                  key={j.id}
+                  job={j}
+                  onRefresh={() => refreshMut.mutate(j.id)}
+                  refreshing={refreshMut.isPending && refreshMut.variables === j.id}
+                  onDownload={() => downloadJob(j.id, downloadFn)}
+                />
               ))}
             </div>
           )}
