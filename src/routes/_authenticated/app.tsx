@@ -162,9 +162,19 @@ function AppPage() {
                   id="url"
                   placeholder="https://example.com"
                   value={url}
-                  onChange={(e) => setUrl(e.target.value)}
+                  onChange={(e) => {
+                    setUrl(e.target.value);
+                    if (urlError) setUrlError(null);
+                  }}
+                  aria-invalid={urlError ? true : undefined}
+                  className={urlError ? "border-destructive focus-visible:ring-destructive" : ""}
                   required
                 />
+                {urlError ? (
+                  <p className="flex items-center gap-1.5 text-sm text-destructive">
+                    <AlertCircle className="h-4 w-4" /> {urlError}
+                  </p>
+                ) : null}
               </div>
               <div className="grid gap-4 sm:grid-cols-3">
                 <div className="space-y-2">
