@@ -73,15 +73,22 @@ function AppPage() {
     onSuccess: () => {
       toast.success("Clone job submitted");
       setUrl("");
+      setUrlError(null);
       queryClient.invalidateQueries({ queryKey: ["clone_jobs"] });
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Failed to submit job"),
+    onError: (e) => {
+      const { title, description } = friendlyError(e, "Failed to submit job");
+      toast.error(title, { description });
+    },
   });
 
   const refreshMut = useMutation({
     mutationFn: (id: string) => refreshFn({ data: { id } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["clone_jobs"] }),
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Failed to refresh"),
+    onError: (e) => {
+      const { title, description } = friendlyError(e, "Failed to refresh");
+      toast.error(title, { description });
+    },
   });
 
   // Auto-refresh in-progress jobs' events from Ditto (server-side poll).
