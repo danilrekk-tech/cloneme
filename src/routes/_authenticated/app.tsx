@@ -115,10 +115,13 @@ function AppPage() {
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = url.trim();
-    if (!/^https?:\/\/.+/i.test(trimmed)) {
-      toast.error("Enter a valid URL starting with http(s)://");
+    const err = validateUrl(trimmed);
+    if (err) {
+      setUrlError(err);
+      toast.error(err);
       return;
     }
+    setUrlError(null);
     createMut.mutate({ url: trimmed, mode, framework, styling });
   }
 
