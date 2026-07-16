@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { RefreshCw, LogOut, ExternalLink, Sparkles } from "lucide-react";
+import { RefreshCw, LogOut, Download, Sparkles, AlertCircle, ChevronDown, ChevronUp, FileText } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/app")({
   head: () => ({
@@ -52,6 +52,7 @@ function AppPage() {
   }, []);
 
   const [url, setUrl] = useState("");
+  const [urlError, setUrlError] = useState<string | null>(null);
   const [mode, setMode] = useState<"single" | "multi">("single");
   const [framework, setFramework] = useState<"next" | "vite">("next");
   const [styling, setStyling] = useState<"tailwind" | "css">("tailwind");
@@ -72,15 +73,22 @@ function AppPage() {
     onSuccess: () => {
       toast.success("Clone job submitted");
       setUrl("");
+      setUrlError(null);
       queryClient.invalidateQueries({ queryKey: ["clone_jobs"] });
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Failed to submit job"),
+    onError: (e) => {
+      const { title, description } = friendlyError(e, "Failed to submit job");
+      toast.error(title, { description });
+    },
   });
 
   const refreshMut = useMutation({
     mutationFn: (id: string) => refreshFn({ data: { id } }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["clone_jobs"] }),
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Failed to refresh"),
+    onError: (e) => {
+      const { title, description } = friendlyError(e, "Failed to refresh");
+      toast.error(title, { description });
+    },
   });
 
   // Auto-refresh in-progress jobs' events from Ditto (server-side poll).
@@ -107,10 +115,13 @@ function AppPage() {
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = url.trim();
-    if (!/^https?:\/\/.+/i.test(trimmed)) {
-      toast.error("Enter a valid URL starting with http(s)://");
+    const err = validateUrl(trimmed);
+    if (err) {
+      setUrlError(err);
+      toast.error(err);
       return;
     }
+    setUrlError(null);
     createMut.mutate({ url: trimmed, mode, framework, styling });
   }
 
@@ -151,9 +162,19 @@ function AppPage() {
                   id="url"
                   placeholder="https://example.com"
                   value={url}
-                  onChange={(e) => setUrl(e.target.value)}
+                  onChange={(e) => {
+                    setUrl(e.target.value);
+                    if (urlError) setUrlError(null);
+                  }}
+                  aria-invalid={urlError ? true : undefined}
+                  className={urlError ? "border-destructive focus-visible:ring-destructive" : ""}
                   required
                 />
+                {urlError ? (
+                  <p className="flex items-center gap-1.5 text-sm text-destructive">
+                    <AlertCircle className="h-4 w-4" /> {urlError}
+                  </p>
+                ) : null}
               </div>
               <div className="grid gap-4 sm:grid-cols-3">
                 <div className="space-y-2">
@@ -228,13 +249,71 @@ function AppPage() {
   );
 }
 
+function validateUrl(value: string): string | null {
+  if (!value) return "URL is required";
+  if (value.length > 2048) return "URL is too long (max 2048 characters)";
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return "Not a valid URL. Include the scheme, e.g. https://example.com";
+  }
+  if (!/^https?:$/.test(parsed.protocol)) {
+    return "Only http:// and https:// URLs are supported";
+  }
+  if (!parsed.hostname || !parsed.hostname.includes(".")) {
+    return "URL must include a valid domain";
+  }
+  return null;
+}
+
+function friendlyError(e: unknown, fallback: string): { title: string; description?: string } {
+  const raw = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+  const lower = raw.toLowerCase();
+
+  if (!raw) return { title: fallback };
+
+  if (lower.includes("failed to fetch") || lower.includes("networkerror") || lower.includes("network request")) {
+    return { title: "Network error", description: "Check your connection and try again." };
+  }
+  if (lower.includes("timeout") || lower.includes("timed out") || lower.includes("etimedout")) {
+    return { title: "Request timed out", description: "The Ditto service didn't respond in time. Try refreshing the job." };
+  }
+  if (/\b401\b/.test(raw) || lower.includes("unauthorized")) {
+    return { title: "Not authorized (401)", description: "Your session or the Ditto API key is invalid. Sign out and back in, or check DITTO_API_KEY." };
+  }
+  if (/\b403\b/.test(raw) || lower.includes("forbidden")) {
+    return { title: "Access denied (403)", description: "The Ditto API rejected the request. Verify your API key permissions." };
+  }
+  if (/\b429\b/.test(raw) || lower.includes("rate limit")) {
+    return { title: "Rate limited (429)", description: "Too many requests to Ditto. Wait a bit and try again." };
+  }
+  if (/\b5\d{2}\b/.test(raw)) {
+    return { title: "Ditto service error", description: raw.slice(0, 200) };
+  }
+  if (lower.includes("no authorization header")) {
+    return { title: "Session expired", description: "Please sign in again." };
+  }
+  return { title: fallback, description: raw.slice(0, 240) };
+}
+
+function formatBytes(bytes: number): string {
+  if (!bytes || bytes < 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let i = 0;
+  let v = bytes;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
 async function downloadJob(
   id: string,
   fn: (args: { data: { id: string } }) => Promise<{ filename: string; contentType: string; base64: string }>,
 ) {
+  const tId = toast.loading("Preparing download…");
   try {
-    toast.info("Preparing download…");
     const res = await fn({ data: { id } });
+    if (!res.base64) throw new Error("Empty download from Ditto");
     const bin = atob(res.base64);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -247,8 +326,10 @@ async function downloadJob(
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+    toast.success(`Downloaded ${res.filename} (${formatBytes(bytes.length)})`, { id: tId });
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : "Download failed");
+    const { title, description } = friendlyError(e, "Download failed");
+    toast.error(title, { id: tId, description });
   }
 }
 
@@ -263,42 +344,104 @@ function JobRow({
   refreshing: boolean;
   onDownload: () => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const done = ["done", "succeeded"].includes(job.status);
   const failed = ["failed", "error", "cancelled"].includes(job.status);
   const variant: "default" | "secondary" | "destructive" | "outline" =
     done ? "default" : failed ? "destructive" : "secondary";
-  const fileCount: number | undefined = job.result?.files?.count;
+
+  const files: { count?: number; totalBytes?: number; paths?: string[] } | null =
+    job.result?.files ?? null;
+  const fileCount = files?.count ?? 0;
+  const totalBytes = files?.totalBytes ?? 0;
+  const paths = files?.paths ?? [];
+  const emptyResult = done && fileCount === 0;
+
+  const displayError = job.error
+    ? friendlyError(new Error(job.error), "Job failed")
+    : null;
 
   return (
     <Card>
-      <CardContent className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <Badge variant={variant} className="capitalize">{job.status}</Badge>
-            <span className="text-xs text-muted-foreground">
-              {job.framework} · {job.styling} · {job.mode}
-              {fileCount ? ` · ${fileCount} files` : ""}
-            </span>
+      <CardContent className="py-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={variant} className="capitalize">{job.status}</Badge>
+              <span className="text-xs text-muted-foreground">
+                {job.framework} · {job.styling} · {job.mode}
+              </span>
+              {done && fileCount > 0 ? (
+                <span className="text-xs font-medium text-foreground">
+                  {fileCount} files · {formatBytes(totalBytes)}
+                </span>
+              ) : null}
+            </div>
+            <div className="mt-1 truncate text-sm font-medium">{job.source_url}</div>
+
+            {displayError ? (
+              <div className="mt-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
+                <div className="flex items-center gap-1.5 font-medium">
+                  <AlertCircle className="h-3.5 w-3.5" /> {displayError.title}
+                </div>
+                {displayError.description ? (
+                  <div className="mt-0.5 text-destructive/90">{displayError.description}</div>
+                ) : null}
+              </div>
+            ) : emptyResult ? (
+              <div className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-400">
+                <div className="flex items-center gap-1.5 font-medium">
+                  <AlertCircle className="h-3.5 w-3.5" /> Empty result
+                </div>
+                <div className="mt-0.5">Ditto finished but returned no files. The source page may be blocked or empty.</div>
+              </div>
+            ) : job.last_event?.message ? (
+              <div className="mt-1 truncate text-xs text-muted-foreground">{String(job.last_event.message)}</div>
+            ) : null}
           </div>
-          <div className="mt-1 truncate text-sm font-medium">{job.source_url}</div>
-          {job.error ? (
-            <div className="mt-1 truncate text-xs text-destructive">{job.error}</div>
-          ) : job.last_event?.message ? (
-            <div className="mt-1 truncate text-xs text-muted-foreground">{String(job.last_event.message)}</div>
-          ) : null}
-        </div>
-        <div className="flex items-center gap-2">
-          {done ? (
-            <Button size="sm" onClick={onDownload}>
-              <ExternalLink className="mr-2 h-4 w-4" /> Download .tgz
+
+          <div className="flex items-center gap-2 sm:shrink-0">
+            {done && fileCount > 0 ? (
+              <Button size="sm" onClick={onDownload}>
+                <Download className="mr-2 h-4 w-4" /> Download .tgz
+              </Button>
+            ) : null}
+            <Button variant="outline" size="sm" onClick={onRefresh} disabled={refreshing}>
+              <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} /> Update
             </Button>
-          ) : null}
-          <Button variant="outline" size="sm" onClick={onRefresh} disabled={refreshing}>
-            <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} /> Update
-          </Button>
+          </div>
         </div>
+
+        {done && fileCount > 0 ? (
+          <div className="mt-3 border-t border-border pt-3">
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+            >
+              {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              {expanded ? "Hide files" : `Show files (${Math.min(fileCount, paths.length)}${fileCount > paths.length ? ` of ${fileCount}` : ""})`}
+            </button>
+            {expanded ? (
+              <ul className="mt-2 max-h-64 space-y-0.5 overflow-auto rounded-md border border-border bg-muted/30 p-2 font-mono text-xs">
+                {paths.map((p) => (
+                  <li key={p} className="flex items-center gap-1.5 truncate text-muted-foreground">
+                    <FileText className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{p}</span>
+                  </li>
+                ))}
+                {fileCount > paths.length ? (
+                  <li className="pt-1 text-[11px] italic text-muted-foreground">
+                    …and {fileCount - paths.length} more. Download the archive to see all.
+                  </li>
+                ) : null}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );
 }
+
 
