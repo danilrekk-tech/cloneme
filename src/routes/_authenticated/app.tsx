@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { RefreshCw, LogOut, ExternalLink, Sparkles } from "lucide-react";
+import { RefreshCw, LogOut, Download, Sparkles, AlertCircle, ChevronDown, ChevronUp, FileText } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/app")({
   head: () => ({
