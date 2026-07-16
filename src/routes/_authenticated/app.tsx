@@ -52,6 +52,7 @@ function AppPage() {
   }, []);
 
   const [url, setUrl] = useState("");
+  const [urlError, setUrlError] = useState<string | null>(null);
   const [mode, setMode] = useState<"single" | "multi">("single");
   const [framework, setFramework] = useState<"next" | "vite">("next");
   const [styling, setStyling] = useState<"tailwind" | "css">("tailwind");
