@@ -19,35 +19,18 @@ function requireDittoKey(): string {
   return key;
 }
 
-function pickStatusFromEvents(events: unknown, fallback: string): {
-  status: string;
-  last: unknown;
-  result: unknown;
-  error: string | null;
-} {
-  let list: any[] = [];
-  if (Array.isArray(events)) list = events;
-  else if (events && typeof events === "object") {
-    const anyEv = events as any;
-    if (Array.isArray(anyEv.events)) list = anyEv.events;
-    else if (Array.isArray(anyEv.data)) list = anyEv.data;
-    else if (Array.isArray(anyEv.items)) list = anyEv.items;
-  }
-  const last = list.length ? list[list.length - 1] : null;
-  let status = fallback;
-  let result: unknown = null;
-  let error: string | null = null;
-  for (const ev of list) {
-    const s = ev?.status ?? ev?.state ?? ev?.type;
-    if (typeof s === "string") status = s;
-    if (ev?.result) result = ev.result;
-    if (ev?.artifact) result = ev.artifact;
-    if (ev?.download_url || ev?.downloadUrl || ev?.zip_url) {
-      result = { downloadUrl: ev.download_url ?? ev.downloadUrl ?? ev.zip_url, ...(typeof result === "object" && result ? result : {}) };
-    }
-    if (ev?.error) error = typeof ev.error === "string" ? ev.error : JSON.stringify(ev.error);
-  }
-  return { status, last, result, error };
+function isTerminal(status: string): boolean {
+  return ["succeeded", "done", "failed", "error", "cancelled"].includes(status);
+}
+
+function summarizeFiles(files: Record<string, any> | undefined) {
+  if (!files || typeof files !== "object") return null;
+  const entries = Object.entries(files);
+  return {
+    count: entries.length,
+    totalBytes: entries.reduce((s, [, v]: [string, any]) => s + (Number(v?.bytes) || 0), 0),
+    paths: entries.slice(0, 20).map(([p]) => p),
+  };
 }
 
 export const createCloneJob = createServerFn({ method: "POST" })
@@ -87,19 +70,24 @@ export const createCloneJob = createServerFn({ method: "POST" })
     if (!res.ok) {
       await supabase.from("clone_jobs").update({
         status: "failed",
-        error: `Ditto API ${res.status}: ${text.slice(0, 500)}`,
+        error: `Ditto API ${res.status}: ${text.slice(0, 800)}`,
       }).eq("id", row.id);
-      throw new Error(`Ditto API error [${res.status}]: ${text.slice(0, 300)}`);
+      throw new Error(`Ditto API ${res.status}: ${text.slice(0, 500)}`);
     }
 
     let body: any = {};
     try { body = text ? JSON.parse(text) : {}; } catch {}
-    const jobId = body.jobId ?? body.id ?? body.job_id;
-    const status = body.status ?? "queued";
+    const jobId: string | null = body.jobId ?? body.id ?? body.job_id ?? null;
+    const status: string = body.status ?? (jobId ? "queued" : "unknown");
+    const filesSummary = summarizeFiles(body.files);
 
     const { data: updated } = await supabase
       .from("clone_jobs")
-      .update({ ditto_job_id: jobId ?? null, status })
+      .update({
+        ditto_job_id: jobId,
+        status,
+        result: filesSummary ? { files: filesSummary } : null,
+      })
       .eq("id", row.id)
       .select()
       .single();
@@ -137,28 +125,96 @@ export const refreshCloneJob = createServerFn({ method: "POST" })
     if (error || !row) throw new Error("Job not found");
     if (!row.ditto_job_id) return row;
 
-    const res = await fetch(`${DITTO_BASE}/clones/${encodeURIComponent(row.ditto_job_id)}/events?after=0`, {
+    // Poll status
+    const statusRes = await fetch(`${DITTO_BASE}/clones/${encodeURIComponent(row.ditto_job_id)}`, {
       headers: { "Authorization": `Bearer ${key}`, "Accept": "application/json" },
     });
-    const text = await res.text();
-    if (!res.ok) {
-      return row;
+    const statusText = await statusRes.text();
+    if (!statusRes.ok) {
+      const errMsg = `Ditto ${statusRes.status}: ${statusText.slice(0, 300)}`;
+      const { data: updated } = await supabase
+        .from("clone_jobs")
+        .update({ error: errMsg })
+        .eq("id", row.id)
+        .select()
+        .single();
+      return updated ?? row;
     }
 
-    let parsed: unknown = null;
-    try { parsed = text ? JSON.parse(text) : null; } catch { parsed = null; }
-    const { status, last, result, error: evErr } = pickStatusFromEvents(parsed, row.status);
+    let meta: any = {};
+    try { meta = statusText ? JSON.parse(statusText) : {}; } catch {}
+    const status: string = meta.status ?? row.status;
+    const errFromMeta: string | null = typeof meta.error === "string" ? meta.error : meta.error ? JSON.stringify(meta.error) : null;
+
+    let filesSummary: any = row.result ?? null;
+    if (isTerminal(status) && ["succeeded", "done"].includes(status)) {
+      // Fetch file map summary
+      const rRes = await fetch(`${DITTO_BASE}/clones/${encodeURIComponent(row.ditto_job_id)}/result`, {
+        headers: { "Authorization": `Bearer ${key}`, "Accept": "application/json" },
+      });
+      if (rRes.ok) {
+        try {
+          const rBody: any = await rRes.json();
+          filesSummary = { files: summarizeFiles(rBody.files) };
+        } catch { /* ignore */ }
+      }
+    }
 
     const { data: updated } = await supabase
       .from("clone_jobs")
       .update({
         status,
-        last_event: last as any,
-        result: result as any,
-        error: evErr,
+        last_event: meta,
+        result: filesSummary,
+        error: errFromMeta,
       })
       .eq("id", row.id)
       .select()
       .single();
     return updated ?? row;
+  });
+
+// Fetches the bundle .tgz from Ditto and returns as base64 for client download.
+export const downloadCloneBundle = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((raw: unknown) => z.object({ id: z.string().uuid() }).parse(raw))
+  .handler(async ({ data, context }) => {
+    const key = requireDittoKey();
+    const { supabase, userId } = context;
+
+    const { data: row, error } = await supabase
+      .from("clone_jobs")
+      .select("id, ditto_job_id, source_url, status")
+      .eq("id", data.id)
+      .eq("user_id", userId)
+      .single();
+    if (error || !row) throw new Error("Job not found");
+    if (!row.ditto_job_id) throw new Error("Job has no upstream id");
+    if (!["succeeded", "done"].includes(row.status)) throw new Error("Job not finished yet");
+
+    const res = await fetch(
+      `${DITTO_BASE}/clones/${encodeURIComponent(row.ditto_job_id)}/bundle?format=tgz`,
+      { headers: { "Authorization": `Bearer ${key}` } },
+    );
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(`Bundle download failed: ${res.status} ${t.slice(0, 200)}`);
+    }
+    const buf = new Uint8Array(await res.arrayBuffer());
+    // base64 encode
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < buf.length; i += chunk) {
+      binary += String.fromCharCode(...buf.subarray(i, i + chunk));
+    }
+    const base64 = btoa(binary);
+    const host = (() => {
+      try { return new URL(row.source_url).hostname.replace(/[^a-z0-9.-]/gi, "_"); }
+      catch { return "clone"; }
+    })();
+    return {
+      filename: `${host}-${row.ditto_job_id}.tgz`,
+      contentType: "application/gzip",
+      base64,
+    };
   });
