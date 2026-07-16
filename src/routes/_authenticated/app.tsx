@@ -44,6 +44,7 @@ function AppPage() {
   const createFn = useServerFn(createCloneJob);
   const listFn = useServerFn(listCloneJobs);
   const refreshFn = useServerFn(refreshCloneJob);
+  const downloadFn = useServerFn(downloadCloneBundle);
 
   const [email, setEmail] = useState<string | null>(null);
   useEffect(() => {
