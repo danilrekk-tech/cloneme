@@ -228,12 +228,46 @@ function AppPage() {
   );
 }
 
-function JobRow({ job, onRefresh, refreshing }: { job: Job; onRefresh: () => void; refreshing: boolean }) {
+async function downloadJob(
+  id: string,
+  fn: (args: { data: { id: string } }) => Promise<{ filename: string; contentType: string; base64: string }>,
+) {
+  try {
+    toast.info("Preparing download…");
+    const res = await fn({ data: { id } });
+    const bin = atob(res.base64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const blob = new Blob([bytes], { type: res.contentType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = res.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : "Download failed");
+  }
+}
+
+function JobRow({
+  job,
+  onRefresh,
+  refreshing,
+  onDownload,
+}: {
+  job: Job;
+  onRefresh: () => void;
+  refreshing: boolean;
+  onDownload: () => void;
+}) {
   const done = ["done", "succeeded"].includes(job.status);
   const failed = ["failed", "error", "cancelled"].includes(job.status);
   const variant: "default" | "secondary" | "destructive" | "outline" =
     done ? "default" : failed ? "destructive" : "secondary";
-  const downloadUrl: string | undefined = job.result?.downloadUrl ?? job.result?.download_url ?? job.result?.zip_url;
+  const fileCount: number | undefined = job.result?.files?.count;
 
   return (
     <Card>
@@ -243,6 +277,7 @@ function JobRow({ job, onRefresh, refreshing }: { job: Job; onRefresh: () => voi
             <Badge variant={variant} className="capitalize">{job.status}</Badge>
             <span className="text-xs text-muted-foreground">
               {job.framework} · {job.styling} · {job.mode}
+              {fileCount ? ` · ${fileCount} files` : ""}
             </span>
           </div>
           <div className="mt-1 truncate text-sm font-medium">{job.source_url}</div>
@@ -253,12 +288,10 @@ function JobRow({ job, onRefresh, refreshing }: { job: Job; onRefresh: () => voi
           ) : null}
         </div>
         <div className="flex items-center gap-2">
-          {downloadUrl ? (
-            <a href={downloadUrl} target="_blank" rel="noreferrer">
-              <Button size="sm">
-                <ExternalLink className="mr-2 h-4 w-4" /> Download
-              </Button>
-            </a>
+          {done ? (
+            <Button size="sm" onClick={onDownload}>
+              <ExternalLink className="mr-2 h-4 w-4" /> Download .tgz
+            </Button>
           ) : null}
           <Button variant="outline" size="sm" onClick={onRefresh} disabled={refreshing}>
             <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} /> Update
@@ -268,3 +301,4 @@ function JobRow({ job, onRefresh, refreshing }: { job: Job; onRefresh: () => voi
     </Card>
   );
 }
+
