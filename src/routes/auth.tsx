@@ -10,8 +10,8 @@ import { toast } from "sonner";
 export const Route = createFileRoute("/auth")({
   head: () => ({
     meta: [
-      { title: "Sign in — Ditto Clone Studio" },
-      { name: "description", content: "Sign in or create an account to clone websites into clean Next.js or Vite code." },
+      { title: "Вход — Clone Studio" },
+      { name: "description", content: "Войдите или создайте аккаунт, чтобы клонировать сайты и запускать AI-доработку." },
     ],
   }),
   component: AuthPage,
@@ -41,7 +41,7 @@ function AuthPage() {
           options: { emailRedirectTo: window.location.origin + "/app" },
         });
         if (error) throw error;
-        toast.success("Account created. Signing you in…");
+        toast.success("Аккаунт создан. Входим…");
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
@@ -49,7 +49,7 @@ function AuthPage() {
       const { data } = await supabase.auth.getSession();
       if (data.session) navigate({ to: "/app" });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Authentication failed");
+      toast.error(err instanceof Error ? err.message : "Ошибка аутентификации");
     } finally {
       setLoading(false);
     }
@@ -58,12 +58,14 @@ function AuthPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4 py-12">
       <div className="w-full max-w-md">
-        <Link to="/" className="mb-6 block text-sm text-muted-foreground hover:text-foreground">← Back home</Link>
+        <Link to="/" className="mb-6 block text-sm text-muted-foreground hover:text-foreground">← На главную</Link>
         <Card>
           <CardHeader>
-            <CardTitle className="text-2xl">{mode === "signin" ? "Welcome back" : "Create your account"}</CardTitle>
+            <CardTitle className="text-2xl">{mode === "signin" ? "С возвращением" : "Создайте аккаунт"}</CardTitle>
             <CardDescription>
-              {mode === "signin" ? "Sign in to clone sites and track your jobs." : "Free while ditto is free. No credit card."}
+              {mode === "signin"
+                ? "Войдите, чтобы клонировать сайты и следить за задачами."
+                : "Бесплатно, пока ditto бесплатен. Без карты."}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -73,11 +75,11 @@ function AuthPage() {
                 <Input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password">Пароль</Label>
                 <Input id="password" type="password" required minLength={6} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === "signin" ? "current-password" : "new-password"} />
               </div>
               <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? "Please wait…" : mode === "signin" ? "Sign in" : "Create account"}
+                {loading ? "Секунду…" : mode === "signin" ? "Войти" : "Создать аккаунт"}
               </Button>
             </form>
             <button
@@ -85,7 +87,7 @@ function AuthPage() {
               className="mt-4 w-full text-sm text-muted-foreground hover:text-foreground"
               onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
             >
-              {mode === "signin" ? "Need an account? Sign up" : "Already have an account? Sign in"}
+              {mode === "signin" ? "Нет аккаунта? Зарегистрируйтесь" : "Уже есть аккаунт? Войти"}
             </button>
           </CardContent>
         </Card>

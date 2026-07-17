@@ -19,10 +19,16 @@ export type Database = {
           created_at: string
           ditto_job_id: string | null
           error: string | null
+          files_path: string | null
           framework: string
           id: string
           last_event: Json | null
           mode: string
+          refined_at: string | null
+          refined_brief: string | null
+          refined_error: string | null
+          refined_path: string | null
+          refined_status: string | null
           result: Json | null
           source_url: string
           status: string
@@ -34,10 +40,16 @@ export type Database = {
           created_at?: string
           ditto_job_id?: string | null
           error?: string | null
+          files_path?: string | null
           framework?: string
           id?: string
           last_event?: Json | null
           mode?: string
+          refined_at?: string | null
+          refined_brief?: string | null
+          refined_error?: string | null
+          refined_path?: string | null
+          refined_status?: string | null
           result?: Json | null
           source_url: string
           status?: string
@@ -49,10 +61,16 @@ export type Database = {
           created_at?: string
           ditto_job_id?: string | null
           error?: string | null
+          files_path?: string | null
           framework?: string
           id?: string
           last_event?: Json | null
           mode?: string
+          refined_at?: string | null
+          refined_brief?: string | null
+          refined_error?: string | null
+          refined_path?: string | null
+          refined_status?: string | null
           result?: Json | null
           source_url?: string
           status?: string
