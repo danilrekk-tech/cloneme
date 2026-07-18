@@ -504,6 +504,8 @@ function JobRow({
   onDownload,
   onRefine,
   onPreview,
+  onDelete,
+  deleting,
 }: {
   job: Job;
   onRefresh: () => void;
@@ -511,6 +513,8 @@ function JobRow({
   onDownload: () => void;
   onRefine: () => void;
   onPreview: () => void;
+  onDelete: () => void;
+  deleting: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const done = ["done", "succeeded"].includes(job.status);
