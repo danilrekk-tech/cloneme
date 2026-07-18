@@ -323,6 +323,12 @@ function AppPage() {
                     setRefineBrief(j.refined_brief ?? "");
                   }}
                   onPreview={() => navigate({ to: "/preview/$jobId", params: { jobId: j.id } })}
+                  onDelete={() => {
+                    if (confirm(`Удалить клон ${j.source_url}? Все версии AI-доработки также будут удалены.`)) {
+                      deleteMut.mutate(j.id);
+                    }
+                  }}
+                  deleting={deleteMut.isPending && deleteMut.variables === j.id}
                 />
               ))}
             </div>
