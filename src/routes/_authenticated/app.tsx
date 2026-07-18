@@ -592,20 +592,42 @@ function JobRow({
           <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
             {done && fileCount > 0 ? (
               <>
-                <Button size="sm" variant="outline" onClick={onPreview}>
-                  <Eye className="mr-2 h-4 w-4" /> Просмотр
+                <Button size="sm" onClick={onPreview}>
+                  <Eye className="mr-2 h-4 w-4" /> Открыть
                 </Button>
-                <Button size="sm" onClick={onDownload}>
-                  <Download className="mr-2 h-4 w-4" /> Скачать .zip
+                {refineReady ? (
+                  <a
+                    href={`/preview/${job.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex"
+                  >
+                    <Button size="sm" variant="outline">
+                      <ExternalLink className="mr-2 h-4 w-4" /> В новой вкладке
+                    </Button>
+                  </a>
+                ) : null}
+                <Button size="sm" variant="outline" onClick={onDownload}>
+                  <Download className="mr-2 h-4 w-4" /> .zip
                 </Button>
                 <Button size="sm" variant="secondary" onClick={onRefine} disabled={refineBusy}>
                   {refineBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-                  {refineReady ? "Пересобрать AI" : "AI-доработка"}
+                  {refineReady ? "Новая AI-версия" : "AI-доработка"}
                 </Button>
               </>
             ) : null}
             <Button variant="outline" size="sm" onClick={onRefresh} disabled={refreshing}>
-              <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} /> Обновить
+              <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onDelete}
+              disabled={deleting}
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              title="Удалить клон"
+            >
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
             </Button>
           </div>
         </div>
