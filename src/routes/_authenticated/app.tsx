@@ -150,6 +150,18 @@ function AppPage() {
     },
   });
 
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => deleteFn({ data: { id } }),
+    onSuccess: () => {
+      toast.success("Клон удалён");
+      queryClient.invalidateQueries({ queryKey: ["clone_jobs"] });
+    },
+    onError: (e) => {
+      const { title, description } = friendlyError(e, "Не удалось удалить");
+      toast.error(title, { description });
+    },
+  });
+
   useEffect(() => {
     const jobs = (jobsQuery.data as Job[] | undefined) ?? [];
     const active = jobs.filter(
