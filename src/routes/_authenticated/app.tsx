@@ -9,6 +9,7 @@ import {
   refreshCloneJob,
   downloadCloneBundle,
   refineClone,
+  deleteCloneJob,
 } from "@/lib/ditto.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,6 +39,8 @@ import {
   Wand2,
   Eye,
   Loader2,
+  Trash2,
+  ExternalLink,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/app")({
@@ -79,6 +82,7 @@ function AppPage() {
   const refreshFn = useServerFn(refreshCloneJob);
   const downloadFn = useServerFn(downloadCloneBundle);
   const refineFn = useServerFn(refineClone);
+  const deleteFn = useServerFn(deleteCloneJob);
 
   const [email, setEmail] = useState<string | null>(null);
   useEffect(() => {
@@ -142,6 +146,18 @@ function AppPage() {
     },
     onError: (e) => {
       const { title, description } = friendlyError(e, "AI-доработка не удалась");
+      toast.error(title, { description });
+    },
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => deleteFn({ data: { id } }),
+    onSuccess: () => {
+      toast.success("Клон удалён");
+      queryClient.invalidateQueries({ queryKey: ["clone_jobs"] });
+    },
+    onError: (e) => {
+      const { title, description } = friendlyError(e, "Не удалось удалить");
       toast.error(title, { description });
     },
   });
@@ -307,6 +323,12 @@ function AppPage() {
                     setRefineBrief(j.refined_brief ?? "");
                   }}
                   onPreview={() => navigate({ to: "/preview/$jobId", params: { jobId: j.id } })}
+                  onDelete={() => {
+                    if (confirm(`Удалить клон ${j.source_url}? Все версии AI-доработки также будут удалены.`)) {
+                      deleteMut.mutate(j.id);
+                    }
+                  }}
+                  deleting={deleteMut.isPending && deleteMut.variables === j.id}
                 />
               ))}
             </div>
@@ -482,6 +504,8 @@ function JobRow({
   onDownload,
   onRefine,
   onPreview,
+  onDelete,
+  deleting,
 }: {
   job: Job;
   onRefresh: () => void;
@@ -489,6 +513,8 @@ function JobRow({
   onDownload: () => void;
   onRefine: () => void;
   onPreview: () => void;
+  onDelete: () => void;
+  deleting: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const done = ["done", "succeeded"].includes(job.status);
@@ -566,20 +592,42 @@ function JobRow({
           <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
             {done && fileCount > 0 ? (
               <>
-                <Button size="sm" variant="outline" onClick={onPreview}>
-                  <Eye className="mr-2 h-4 w-4" /> Просмотр
+                <Button size="sm" onClick={onPreview}>
+                  <Eye className="mr-2 h-4 w-4" /> Открыть
                 </Button>
-                <Button size="sm" onClick={onDownload}>
-                  <Download className="mr-2 h-4 w-4" /> Скачать .zip
+                {refineReady ? (
+                  <a
+                    href={`/preview/${job.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex"
+                  >
+                    <Button size="sm" variant="outline">
+                      <ExternalLink className="mr-2 h-4 w-4" /> В новой вкладке
+                    </Button>
+                  </a>
+                ) : null}
+                <Button size="sm" variant="outline" onClick={onDownload}>
+                  <Download className="mr-2 h-4 w-4" /> .zip
                 </Button>
                 <Button size="sm" variant="secondary" onClick={onRefine} disabled={refineBusy}>
                   {refineBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-                  {refineReady ? "Пересобрать AI" : "AI-доработка"}
+                  {refineReady ? "Новая AI-версия" : "AI-доработка"}
                 </Button>
               </>
             ) : null}
             <Button variant="outline" size="sm" onClick={onRefresh} disabled={refreshing}>
-              <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} /> Обновить
+              <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onDelete}
+              disabled={deleting}
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              title="Удалить клон"
+            >
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
             </Button>
           </div>
         </div>

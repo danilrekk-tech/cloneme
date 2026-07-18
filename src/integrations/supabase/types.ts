@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       clone_jobs: {
         Row: {
+          active_refinement_id: string | null
           created_at: string
           ditto_job_id: string | null
           error: string | null
@@ -37,6 +38,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          active_refinement_id?: string | null
           created_at?: string
           ditto_job_id?: string | null
           error?: string | null
@@ -58,6 +60,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          active_refinement_id?: string | null
           created_at?: string
           ditto_job_id?: string | null
           error?: string | null
@@ -78,7 +81,71 @@ export type Database = {
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "clone_jobs_active_refinement_id_fkey"
+            columns: ["active_refinement_id"]
+            isOneToOne: false
+            referencedRelation: "clone_refinements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      clone_refinements: {
+        Row: {
+          audit: string | null
+          brief: string | null
+          changes: string | null
+          created_at: string
+          error: string | null
+          id: string
+          job_id: string
+          model: string | null
+          preview_path: string | null
+          status: string
+          updated_at: string
+          user_id: string
+          version: number
+        }
+        Insert: {
+          audit?: string | null
+          brief?: string | null
+          changes?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          job_id: string
+          model?: string | null
+          preview_path?: string | null
+          status?: string
+          updated_at?: string
+          user_id: string
+          version: number
+        }
+        Update: {
+          audit?: string | null
+          brief?: string | null
+          changes?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          job_id?: string
+          model?: string | null
+          preview_path?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clone_refinements_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "clone_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
       }
     }
     Views: {
