@@ -16,7 +16,7 @@ export const Route = createFileRoute("/")({
       { property: "og:title", content: "Clone Studio — клонирование сайтов и AI-доработка" },
       {
         property: "og:description",
-        content: "Клонируйте любой сайт в чистый код и улучшайте страницу через AI на основе полной копии.",
+        content: "Вставьте URL — получите чистый Next.js или Vite проект за минуты, а затем детально доработайте страницу с помощью AI. На базе open-source движка ditto.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
