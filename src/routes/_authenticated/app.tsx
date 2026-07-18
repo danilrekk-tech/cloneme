@@ -39,6 +39,8 @@ import {
   Wand2,
   Eye,
   Loader2,
+  Trash2,
+  ExternalLink,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/app")({
