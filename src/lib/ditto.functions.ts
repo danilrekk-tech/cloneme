@@ -4,6 +4,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 const DITTO_BASE = "https://api.ditto.site/v1";
 const BUCKET = "clone-artifacts";
+const REFINE_MODEL = "google/gemini-2.5-flash";
 
 const createSchema = z.object({
   url: z.string().url().max(2048),
@@ -225,7 +226,6 @@ export const refreshCloneJob = createServerFn({ method: "POST" })
     return updated ?? row;
   });
 
-// Returns a downloadable ZIP built from the stored file map, materializing binaries by fetching Ditto URLs.
 export const downloadCloneBundle = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((raw: unknown) => z.object({ id: z.string().uuid() }).parse(raw))
@@ -241,7 +241,6 @@ export const downloadCloneBundle = createServerFn({ method: "POST" })
       .single();
     if (error || !row) throw new Error("Задача не найдена");
 
-    // Ensure files.json exists in storage
     let filesPath = row.files_path;
     if (!filesPath && row.ditto_job_id) {
       const stored = await fetchAndStoreResult(key, supabase, userId, row);
@@ -274,19 +273,8 @@ export const downloadCloneBundle = createServerFn({ method: "POST" })
     }
 
     const buf = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
-    let binary = "";
-    const chunk = 0x8000;
-    for (let i = 0; i < buf.length; i += chunk) {
-      binary += String.fromCharCode(...buf.subarray(i, i + chunk));
-    }
-    const base64 = btoa(binary);
-    const host = (() => {
-      try {
-        return new URL(row.source_url).hostname.replace(/[^a-z0-9.-]/gi, "_");
-      } catch {
-        return "clone";
-      }
-    })();
+    const base64 = bytesToBase64(buf);
+    const host = safeHost(row.source_url);
     return {
       filename: `${host}-${row.ditto_job_id ?? row.id}.zip`,
       contentType: "application/zip",
@@ -294,7 +282,24 @@ export const downloadCloneBundle = createServerFn({ method: "POST" })
     };
   });
 
-// Returns the raw file map for the browser (used by preview + source viewer).
+function bytesToBase64(buf: Uint8Array): string {
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < buf.length; i += chunk) {
+    binary += String.fromCharCode(...buf.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+function safeHost(u: string): string {
+  try {
+    return new URL(u).hostname.replace(/[^a-z0-9.-]/gi, "_");
+  } catch {
+    return "clone";
+  }
+}
+
+// Returns files + active refinement (with previewHtml) + refinements history.
 export const getCloneFiles = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((raw: unknown) => z.object({ id: z.string().uuid() }).parse(raw))
@@ -302,7 +307,7 @@ export const getCloneFiles = createServerFn({ method: "POST" })
     const { supabase, userId } = context;
     const { data: row, error } = await supabase
       .from("clone_jobs")
-      .select("id, files_path, refined_path, source_url")
+      .select("id, files_path, source_url, active_refinement_id")
       .eq("id", data.id)
       .eq("user_id", userId)
       .single();
@@ -310,25 +315,63 @@ export const getCloneFiles = createServerFn({ method: "POST" })
     if (!row.files_path) throw new Error("Файлы клона ещё не готовы");
 
     const files = await downloadFilesJson(supabase, row.files_path);
-    let refined: { previewHtml?: string; notes?: string; brief?: string } | null = null;
-    if (row.refined_path) {
+
+    const { data: refinements } = await (supabase as any)
+      .from("clone_refinements")
+      .select("id, version, brief, audit, changes, preview_path, status, error, model, created_at")
+      .eq("job_id", row.id)
+      .eq("user_id", userId)
+      .order("version", { ascending: false });
+
+    const list = (refinements ?? []) as any[];
+    const activeMeta =
+      list.find((r) => r.id === row.active_refinement_id) ||
+      list.find((r) => r.status === "ready");
+
+    let active: any = null;
+    if (activeMeta?.preview_path) {
       try {
-        const { data: blob } = await supabase.storage.from(BUCKET).download(row.refined_path);
-        if (blob) refined = JSON.parse(await (blob as Blob).text());
+        const { data: blob } = await supabase.storage.from(BUCKET).download(activeMeta.preview_path);
+        if (blob) {
+          const previewHtml = await (blob as Blob).text();
+          active = {
+            id: activeMeta.id,
+            version: activeMeta.version,
+            brief: activeMeta.brief,
+            audit: activeMeta.audit,
+            changes: activeMeta.changes,
+            previewHtml,
+          };
+        }
       } catch {
         /* ignore */
       }
     }
-    return { sourceUrl: row.source_url, files, refined };
+
+    return {
+      sourceUrl: row.source_url,
+      files,
+      active,
+      refinements: list.map((r) => ({
+        id: r.id,
+        version: r.version,
+        status: r.status,
+        error: r.error,
+        brief: r.brief,
+        model: r.model,
+        created_at: r.created_at,
+        isActive: r.id === (activeMeta?.id ?? null),
+      })),
+    };
   });
 
-// AI refinement: reads the file map, sends condensed text to Lovable AI Gateway,
-// asks for a beautiful, self-contained single-file HTML preview + notes.
 const refineSchema = z.object({
   id: z.string().uuid(),
   brief: z.string().max(4000).optional(),
 });
 
+// Kick off a refinement: creates a version row (status=processing), then generates
+// with a fast model on a tight text budget so we stay well under Worker timeouts.
 export const refineClone = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((raw: unknown) => refineSchema.parse(raw))
@@ -346,144 +389,360 @@ export const refineClone = createServerFn({ method: "POST" })
     if (error || !row) throw new Error("Задача не найдена");
     if (!row.files_path) throw new Error("Клон ещё не готов");
 
-    await supabase
-      .from("clone_jobs")
-      .update({ refined_status: "processing", refined_error: null, refined_brief: data.brief ?? null })
-      .eq("id", row.id);
-
-    const files = await downloadFilesJson(supabase, row.files_path);
-
-    // Pick the most informative text files, cap total ~180 KB.
-    const textEntries = Object.entries(files).filter(
-      ([, v]) => typeof v?.content === "string" && (v.type ?? "text") === "text",
-    );
-    const priority = (p: string) => {
-      if (/page\.tsx?$|index\.html?$|layout\.tsx?$/.test(p)) return 0;
-      if (/\.tsx?$/.test(p)) return 1;
-      if (/\.(css|scss)$/.test(p)) return 2;
-      if (/content\.ts$|data\.ts$/.test(p)) return 3;
-      if (/\.(json|md|txt)$/.test(p)) return 5;
-      return 4;
-    };
-    textEntries.sort((a, b) => priority(a[0]) - priority(b[0]));
-
-    const excerpts: string[] = [];
-    let budget = 180_000;
-    for (const [path, v] of textEntries) {
-      const content = (v.content ?? "").slice(0, 14_000);
-      const block = `\n===== ${path} =====\n${content}\n`;
-      if (block.length > budget) break;
-      excerpts.push(block);
-      budget -= block.length;
-    }
-
-    const fileList = Object.keys(files).slice(0, 200).join("\n");
+    // Next version number
+    const { data: last } = await (supabase as any)
+      .from("clone_refinements")
+      .select("version")
+      .eq("job_id", row.id)
+      .order("version", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const nextVersion = ((last?.version as number | undefined) ?? 0) + 1;
     const brief = (data.brief ?? "").trim();
 
-    const systemPrompt = `Ты — старший продуктовый дизайнер и фронтенд-инженер. Работаешь в духе принципов "design-taste-frontend": анти-шаблонный вкус, реальные дизайн-системы, аудит перед правкой, никакого дефолтного generic-slop.
+    const { data: refRow, error: refErr } = await (supabase as any)
+      .from("clone_refinements")
+      .insert({
+        job_id: row.id,
+        user_id: userId,
+        version: nextVersion,
+        brief: brief || null,
+        status: "processing",
+        model: REFINE_MODEL,
+      })
+      .select()
+      .single();
+    if (refErr || !refRow) throw new Error(refErr?.message ?? "Не удалось создать версию");
 
-Тебе дают структуру и исходники сайта, сделанные детерминированным клонером (Next.js/Vite). Твоя задача — предложить детально проработанную улучшенную версию посадочной страницы, СОВМЕСТИМУЮ с брендом клона (сохраняй суть, копирайт, цвета, если явно не сказано иначе). Не выдумывай новый бренд — работай ПОВЕРХ клона.
+    await supabase
+      .from("clone_jobs")
+      .update({ refined_status: "processing", refined_error: null, refined_brief: brief || null })
+      .eq("id", row.id);
 
-Проведи короткий аудит (что сломано, generic, что нужно усилить), затем выдай ОДИН самодостаточный HTML-файл preview.html с инлайновыми стилями (Tailwind CDN разрешён), готовый открыть в браузере. Никаких внешних JS-фреймворков, только чистый HTML/CSS и, при необходимости, немного ванильного JS. Файл должен визуально показать финальный результат — hero, ключевые секции, футер, микро-детали.
+    try {
+      const files = await downloadFilesJson(supabase, row.files_path);
 
-Отвечай СТРОГО валидным JSON без markdown-ограждений в формате:
+      // Tight excerpts — keep total ≤ ~40 KB so the model finishes fast (<60s).
+      const textEntries = Object.entries(files).filter(
+        ([, v]) => typeof v?.content === "string" && (v.type ?? "text") === "text",
+      );
+      const priority = (p: string) => {
+        if (/page\.tsx?$|index\.html?$|layout\.tsx?$/.test(p)) return 0;
+        if (/hero|header|footer|nav/i.test(p)) return 1;
+        if (/\.tsx?$/.test(p)) return 2;
+        if (/\.(css|scss)$/.test(p)) return 3;
+        if (/content\.ts$|data\.ts$/.test(p)) return 4;
+        return 5;
+      };
+      textEntries.sort((a, b) => priority(a[0]) - priority(b[0]));
+
+      const excerpts: string[] = [];
+      let budget = 40_000;
+      for (const [path, v] of textEntries) {
+        const content = (v.content ?? "").slice(0, 6_000);
+        const block = `\n===== ${path} =====\n${content}\n`;
+        if (block.length > budget) continue;
+        excerpts.push(block);
+        budget -= block.length;
+      }
+
+      const fileList = Object.keys(files).slice(0, 120).join("\n");
+
+      const systemPrompt = `Ты — старший продуктовый дизайнер и фронтенд-инженер. Работаешь по ритуалу /skill:redesign: анти-шаблонный вкус, чёткая композиция, реальная типографика, никакого generic-slop, никаких дефолтных фиолетовых градиентов.
+
+Тебе дают структуру и куски исходников клонированного сайта. Твоя задача — выдать ОДНУ детально проработанную улучшенную версию посадочной страницы, СОВМЕСТИМУЮ с брендом клона (сохраняй суть, копирайт, цвета, если явно не сказано иначе).
+
+Верни ОДИН самодостаточный HTML-документ preview.html: Tailwind CDN (<script src="https://cdn.tailwindcss.com"></script>) разрешён, шрифты — Google Fonts через <link>. Никаких внешних JS-фреймворков. Полноценный hero, 2–4 контентные секции, футер, микро-детали, аккуратные состояния.
+
+Отвечай СТРОГО валидным JSON без markdown-ограждений:
 {
-  "audit": "краткий аудит (3-6 буллетов)",
-  "changes": "что изменено и почему (3-6 буллетов)",
-  "previewHtml": "<!doctype html>...<html>...</html>"
+  "audit": "3-6 буллетов, что улучшить",
+  "changes": "3-6 буллетов, что сделано и почему",
+  "previewHtml": "<!doctype html>...</html>"
 }`;
 
-    const userPrompt = `Исходный URL: ${row.source_url}
-
-Задача от пользователя (опционально):
-${brief || "(не указано — предложи разумные улучшения)"}
-
-Всего файлов в клоне: ${Object.keys(files).length}
-Список путей (обрезано):
+      const userPrompt = `Исходный URL: ${row.source_url}
+Задача от пользователя: ${brief || "(не указано — предложи разумные улучшения)"}
+Всего файлов: ${Object.keys(files).length}
+Пути (обрезано):
 ${fileList}
 
 Ключевые исходники:
 ${excerpts.join("\n")}
 
-Сделай detailed refinement. previewHtml должен быть ПОЛНЫМ рабочим документом.`;
+Сделай detailed refinement по ритуалу /skill:redesign. previewHtml — ПОЛНЫЙ рабочий документ.`;
 
-    const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${lovableKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-pro",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        response_format: { type: "json_object" },
-      }),
-    });
-
-    if (!aiRes.ok) {
-      const t = await aiRes.text();
-      const msg = `AI ${aiRes.status}: ${t.slice(0, 400)}`;
-      await supabase
-        .from("clone_jobs")
-        .update({ refined_status: "failed", refined_error: msg })
-        .eq("id", row.id);
-      throw new Error(msg);
-    }
-
-    const aiJson: any = await aiRes.json();
-    const raw: string = aiJson?.choices?.[0]?.message?.content ?? "";
-    let parsed: { audit?: string; changes?: string; previewHtml?: string } = {};
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      // Try to extract JSON block
-      const m = raw.match(/\{[\s\S]*\}/);
-      if (m) {
-        try {
-          parsed = JSON.parse(m[0]);
-        } catch {}
+      // Timeout guard — abort before the Worker kills the request.
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 110_000);
+      let aiRes: Response;
+      try {
+        aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${lovableKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: REFINE_MODEL,
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt },
+            ],
+            response_format: { type: "json_object" },
+          }),
+          signal: ctrl.signal,
+        });
+      } finally {
+        clearTimeout(timer);
       }
-    }
-    if (!parsed?.previewHtml || parsed.previewHtml.length < 200) {
-      const msg = "AI не вернул валидный HTML-препросмотр";
+
+      if (!aiRes.ok) {
+        const t = await aiRes.text();
+        throw new Error(`AI ${aiRes.status}: ${t.slice(0, 400)}`);
+      }
+
+      const aiJson: any = await aiRes.json();
+      const raw: string = aiJson?.choices?.[0]?.message?.content ?? "";
+      let parsed: { audit?: string; changes?: string; previewHtml?: string } = {};
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        const m = raw.match(/\{[\s\S]*\}/);
+        if (m) {
+          try {
+            parsed = JSON.parse(m[0]);
+          } catch {}
+        }
+      }
+      if (!parsed?.previewHtml || parsed.previewHtml.length < 200) {
+        throw new Error("AI не вернул валидный HTML-препросмотр");
+      }
+
+      const previewPath = `${userId}/${row.id}/refined/v${nextVersion}.html`;
+      const { error: upErr } = await supabase.storage
+        .from(BUCKET)
+        .upload(previewPath, new Blob([parsed.previewHtml], { type: "text/html" }), {
+          upsert: true,
+          contentType: "text/html",
+        });
+      if (upErr) throw new Error(`Не удалось сохранить HTML: ${upErr.message}`);
+
+      await (supabase as any)
+        .from("clone_refinements")
+        .update({
+          audit: parsed.audit ?? "",
+          changes: parsed.changes ?? "",
+          preview_path: previewPath,
+          status: "ready",
+          error: null,
+        })
+        .eq("id", refRow.id);
+
+      await supabase
+        .from("clone_jobs")
+        .update({
+          active_refinement_id: refRow.id,
+          refined_status: "ready",
+          refined_error: null,
+          refined_at: new Date().toISOString(),
+          refined_path: previewPath,
+        })
+        .eq("id", row.id);
+
+      return { versionId: refRow.id, version: nextVersion };
+    } catch (e: any) {
+      const msg =
+        e?.name === "AbortError"
+          ? "Таймаут генерации (>110с). Попробуйте ещё раз или сузьте бриф."
+          : String(e?.message ?? e).slice(0, 500);
+      await (supabase as any)
+        .from("clone_refinements")
+        .update({ status: "failed", error: msg })
+        .eq("id", refRow.id);
       await supabase
         .from("clone_jobs")
         .update({ refined_status: "failed", refined_error: msg })
         .eq("id", row.id);
       throw new Error(msg);
     }
+  });
 
-    const payload = {
-      brief: brief || null,
-      audit: parsed.audit ?? "",
-      changes: parsed.changes ?? "",
-      previewHtml: parsed.previewHtml,
-      generatedAt: new Date().toISOString(),
-    };
-    const refinedPath = `${userId}/${row.id}/refined.json`;
-    const { error: upErr } = await supabase.storage
-      .from(BUCKET)
-      .upload(refinedPath, new Blob([JSON.stringify(payload)], { type: "application/json" }), {
-        upsert: true,
-        contentType: "application/json",
-      });
-    if (upErr) throw new Error(`Не удалось сохранить улучшенный результат: ${upErr.message}`);
-
-    const { data: updated } = await supabase
+// Set which refinement version is "active" (rollback).
+export const activateRefinement = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((raw: unknown) =>
+    z.object({ jobId: z.string().uuid(), refinementId: z.string().uuid() }).parse(raw),
+  )
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    const { data: r } = await (supabase as any)
+      .from("clone_refinements")
+      .select("id, preview_path, status")
+      .eq("id", data.refinementId)
+      .eq("user_id", userId)
+      .eq("job_id", data.jobId)
+      .maybeSingle();
+    if (!r) throw new Error("Версия не найдена");
+    if (r.status !== "ready" || !r.preview_path) throw new Error("Версия ещё не готова");
+    await supabase
       .from("clone_jobs")
       .update({
-        refined_path: refinedPath,
+        active_refinement_id: r.id,
         refined_status: "ready",
+        refined_path: r.preview_path,
         refined_error: null,
-        refined_at: new Date().toISOString(),
-        refined_brief: brief || null,
       })
-      .eq("id", row.id)
-      .select()
-      .single();
+      .eq("id", data.jobId)
+      .eq("user_id", userId);
+    return { ok: true };
+  });
 
-    return { job: updated, audit: payload.audit, changes: payload.changes };
+// Delete a single refinement version (and its file).
+export const deleteRefinement = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((raw: unknown) => z.object({ refinementId: z.string().uuid() }).parse(raw))
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    const { data: r } = await (supabase as any)
+      .from("clone_refinements")
+      .select("id, job_id, preview_path")
+      .eq("id", data.refinementId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (!r) throw new Error("Версия не найдена");
+    if (r.preview_path) {
+      await supabase.storage.from(BUCKET).remove([r.preview_path]);
+    }
+    await (supabase as any).from("clone_refinements").delete().eq("id", r.id);
+
+    // If this was active, pick the latest ready one as new active (or clear).
+    const { data: job } = await supabase
+      .from("clone_jobs")
+      .select("active_refinement_id")
+      .eq("id", r.job_id)
+      .single();
+    if (job?.active_refinement_id === r.id) {
+      const { data: fallback } = await (supabase as any)
+        .from("clone_refinements")
+        .select("id, preview_path")
+        .eq("job_id", r.job_id)
+        .eq("status", "ready")
+        .order("version", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      await supabase
+        .from("clone_jobs")
+        .update({
+          active_refinement_id: fallback?.id ?? null,
+          refined_path: fallback?.preview_path ?? null,
+          refined_status: fallback ? "ready" : null,
+        })
+        .eq("id", r.job_id);
+    }
+    return { ok: true };
+  });
+
+// Delete a clone job and all its storage/refinements.
+export const deleteCloneJob = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((raw: unknown) => z.object({ id: z.string().uuid() }).parse(raw))
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    const { data: row } = await supabase
+      .from("clone_jobs")
+      .select("id, files_path")
+      .eq("id", data.id)
+      .eq("user_id", userId)
+      .single();
+    if (!row) throw new Error("Задача не найдена");
+
+    // List and remove all storage files under user/job/ prefix
+    const prefix = `${userId}/${row.id}`;
+    try {
+      const collected: string[] = [];
+      async function walk(dir: string) {
+        const { data: list } = await supabase.storage.from(BUCKET).list(dir, { limit: 1000 });
+        for (const it of list ?? []) {
+          const full = `${dir}/${it.name}`;
+          if ((it as any).id) collected.push(full);
+          else await walk(full);
+        }
+      }
+      await walk(prefix);
+      if (collected.length) await supabase.storage.from(BUCKET).remove(collected);
+    } catch {
+      /* best-effort cleanup */
+    }
+
+    await supabase.from("clone_jobs").delete().eq("id", row.id).eq("user_id", userId);
+    return { ok: true };
+  });
+
+// Build a ZIP that contains the full clone + the active refined preview.html.
+export const downloadRefinedBundle = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((raw: unknown) =>
+    z.object({ id: z.string().uuid(), refinementId: z.string().uuid().optional() }).parse(raw),
+  )
+  .handler(async ({ data, context }) => {
+    const key = requireDittoKey();
+    const { supabase, userId } = context;
+
+    const { data: row, error } = await supabase
+      .from("clone_jobs")
+      .select("id, source_url, files_path, active_refinement_id")
+      .eq("id", data.id)
+      .eq("user_id", userId)
+      .single();
+    if (error || !row) throw new Error("Задача не найдена");
+    if (!row.files_path) throw new Error("Файлы клона не готовы");
+
+    const targetId = data.refinementId ?? row.active_refinement_id;
+    if (!targetId) throw new Error("Нет доступной AI-версии");
+    const { data: ref } = await (supabase as any)
+      .from("clone_refinements")
+      .select("id, version, preview_path, audit, changes, brief")
+      .eq("id", targetId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (!ref?.preview_path) throw new Error("AI-версия не готова");
+
+    const { data: htmlBlob } = await supabase.storage.from(BUCKET).download(ref.preview_path);
+    if (!htmlBlob) throw new Error("HTML не найден в хранилище");
+    const previewHtml = await (htmlBlob as Blob).text();
+
+    const files = await downloadFilesJson(supabase, row.files_path);
+
+    const { default: JSZip } = await import("jszip");
+    const zip = new JSZip();
+
+    zip.file("refined/preview.html", previewHtml);
+    zip.file(
+      "refined/README.md",
+      `# Refined preview v${ref.version}\n\nSource: ${row.source_url}\n\n## Brief\n${ref.brief ?? "(none)"}\n\n## Audit\n${ref.audit ?? ""}\n\n## Changes\n${ref.changes ?? ""}\n`,
+    );
+
+    const src = zip.folder("source")!;
+    for (const [path, entry] of Object.entries(files)) {
+      if (entry?.type === "binary" || entry?.url) {
+        try {
+          const br = await fetch(entry.url!, { headers: { Authorization: `Bearer ${key}` } });
+          if (br.ok) {
+            const buf = new Uint8Array(await br.arrayBuffer());
+            src.file(path, buf);
+          }
+        } catch {
+          /* skip */
+        }
+      } else if (typeof entry?.content === "string") {
+        src.file(path, entry.content);
+      }
+    }
+
+    const buf = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+    const base64 = bytesToBase64(buf);
+    const host = safeHost(row.source_url);
+    return {
+      filename: `${host}-refined-v${ref.version}.zip`,
+      contentType: "application/zip",
+      base64,
+    };
   });
