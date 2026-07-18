@@ -9,6 +9,7 @@ import {
   refreshCloneJob,
   downloadCloneBundle,
   refineClone,
+  deleteCloneJob,
 } from "@/lib/ditto.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
