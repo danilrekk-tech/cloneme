@@ -147,6 +147,51 @@ export type Database = {
           },
         ]
       }
+      mcp_servers: {
+        Row: {
+          auth_token: string | null
+          created_at: string
+          enabled: boolean
+          id: string
+          last_checked_at: string | null
+          last_error: string | null
+          name: string
+          tools: Json | null
+          transport: string
+          updated_at: string
+          url: string
+          user_id: string
+        }
+        Insert: {
+          auth_token?: string | null
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          last_checked_at?: string | null
+          last_error?: string | null
+          name: string
+          tools?: Json | null
+          transport?: string
+          updated_at?: string
+          url: string
+          user_id: string
+        }
+        Update: {
+          auth_token?: string | null
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          last_checked_at?: string | null
+          last_error?: string | null
+          name?: string
+          tools?: Json | null
+          transport?: string
+          updated_at?: string
+          url?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
