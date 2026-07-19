@@ -568,7 +568,7 @@ ${excerpts.join("\n")}
     } catch (e: any) {
       const msg =
         e?.name === "AbortError"
-          ? "Таймаут генерации (>110с). Попробуйте ещё раз или сузьте бриф."
+          ? "Таймаут генерации (>165с). Попробуйте сузить бриф или переключить на flash в настройках."
           : String(e?.message ?? e).slice(0, 500);
       await (supabase as any)
         .from("clone_refinements")
