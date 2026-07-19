@@ -1,10 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { getActiveMcpContext } from "./mcp.functions";
 
 const DITTO_BASE = "https://api.ditto.site/v1";
 const BUCKET = "clone-artifacts";
-const REFINE_MODEL = "google/gemini-2.5-flash";
+const REFINE_MODEL = "google/gemini-2.5-pro";
 
 const createSchema = z.object({
   url: z.string().url().max(2048),
@@ -421,8 +422,9 @@ export const refineClone = createServerFn({ method: "POST" })
 
     try {
       const files = await downloadFilesJson(supabase, row.files_path);
+      const mcp = await getActiveMcpContext(supabase, userId);
 
-      // Tight excerpts — keep total ≤ ~40 KB so the model finishes fast (<60s).
+      // Bigger, smarter budget for pro model — total ≤ ~60 KB.
       const textEntries = Object.entries(files).filter(
         ([, v]) => typeof v?.content === "string" && (v.type ?? "text") === "text",
       );
@@ -437,44 +439,59 @@ export const refineClone = createServerFn({ method: "POST" })
       textEntries.sort((a, b) => priority(a[0]) - priority(b[0]));
 
       const excerpts: string[] = [];
-      let budget = 40_000;
+      let budget = 60_000;
       for (const [path, v] of textEntries) {
-        const content = (v.content ?? "").slice(0, 6_000);
+        const content = (v.content ?? "").slice(0, 9_000);
         const block = `\n===== ${path} =====\n${content}\n`;
         if (block.length > budget) continue;
         excerpts.push(block);
         budget -= block.length;
       }
 
-      const fileList = Object.keys(files).slice(0, 120).join("\n");
+      const fileList = Object.keys(files).slice(0, 160).join("\n");
 
-      const systemPrompt = `Ты — старший продуктовый дизайнер и фронтенд-инженер. Работаешь по ритуалу /skill:redesign: анти-шаблонный вкус, чёткая композиция, реальная типографика, никакого generic-slop, никаких дефолтных фиолетовых градиентов.
+      const systemPrompt = `Ты — старший продуктовый дизайнер и фронтенд-инженер, работающий по ритуалу /skill:redesign и /skill:design-taste-frontend-v1.
 
-Тебе дают структуру и куски исходников клонированного сайта. Твоя задача — выдать ОДНУ детально проработанную улучшенную версию посадочной страницы, СОВМЕСТИМУЮ с брендом клона (сохраняй суть, копирайт, цвета, если явно не сказано иначе).
+Твой вкус:
+• Анти-slop. Никаких дефолтных фиолетовых/индиго градиентов, никакого Inter в display, никаких centered hero + 3 симметричных карточек, никаких "Elevate/Seamless/Unleash", никаких Jane Doe и 99.99%.
+• Типографика: display — Space Grotesk / Cabinet Grotesk / Satoshi / Geist, tracking-tight, leading-none для крупных заголовков. Body — Inter/DM Sans, max-w-[65ch], leading-relaxed. НИКАКОГО Inter для display.
+• Палитра: макс. 1 акцент, насыщенность <80%. Off-black (не #000). Zinc/slate базы. Тонированные тени, не неоновый glow. Обязательно тёмная и светлая согласованность.
+• Композиция: асимметрия по умолчанию — split-screen, offset grids, generous whitespace, bento. Никогда generic 3-column feature row. Мобильная версия — строго single-column с px-4 py-8, max-w-7xl mx-auto. Full-height секции = min-h-[100dvh], НЕ h-screen.
+• Материал: карточки только если elevation несёт смысл. Используй border-t / divide-y / negative space. rounded-[1.5rem]+ для крупных поверхностей, тонкий border, лёгкий diffusion shadow.
+• Микро-интеракции: :hover translate-y[-1px], :active scale-[0.98]. Skeleton-состояния, пустые состояния, состояния ошибок. Никаких кастомных курсоров.
+• Контент: реальные, конкретные, продуманные имена/цифры/копии, никаких "Acme/Nexus/SmartFlow". Если сохраняешь бренд клона — сохраняй его копирайт и позиционирование, только полируй.
+• Иконки — Phosphor/Radix стиль inline SVG, strokeWidth 1.5. Изображения — https://picsum.photos/seed/<slug>/W/H или https://images.unsplash.com прямые CDN-ссылки только если реально нужны.
+• Работай ТОЛЬКО в чистом HTML + Tailwind CDN + Google Fonts <link>. Никакого React, Next, alpine.js, никаких import. Разрешён небольшой vanilla JS <script> для навигации/аккордеонов/mobile-menu.
+• Обязательный минимум: sticky/floating nav с mobile-меню (hamburger + slide-down), продуманный hero (не centered, если возможно), 3–5 контентных секций с разной композицией, футер с настоящими ссылками. Мобильная адаптация обязательна — сначала mobile, потом md:/lg:.
 
-Верни ОДИН самодостаточный HTML-документ preview.html: Tailwind CDN (<script src="https://cdn.tailwindcss.com"></script>) разрешён, шрифты — Google Fonts через <link>. Никаких внешних JS-фреймворков. Полноценный hero, 2–4 контентные секции, футер, микро-детали, аккуратные состояния.
-
-Отвечай СТРОГО валидным JSON без markdown-ограждений:
+Формат: Верни СТРОГО валидный JSON, БЕЗ markdown-ограждений, БЕЗ комментариев:
 {
-  "audit": "3-6 буллетов, что улучшить",
-  "changes": "3-6 буллетов, что сделано и почему",
-  "previewHtml": "<!doctype html>...</html>"
-}`;
+  "audit": "5-8 буллетов, конкретно что было слабо и почему (референсы на секции)",
+  "changes": "5-8 буллетов, что именно ты изменил и как это улучшает продукт",
+  "previewHtml": "<!doctype html>...полностью самодостаточный документ..."
+}
 
-      const userPrompt = `Исходный URL: ${row.source_url}
-Задача от пользователя: ${brief || "(не указано — предложи разумные улучшения)"}
-Всего файлов: ${Object.keys(files).length}
+previewHtml обязан:
+1. Начинаться с <!doctype html>, содержать <html lang>, <head> с <meta viewport>, <title>, шрифтами и Tailwind CDN.
+2. Быть адаптивным (mobile-first), с рабочим mobile-меню.
+3. Иметь минимум 4 полноценные секции + hero + футер.
+4. Не содержать placeholder-текстов "Lorem ipsum", "Coming soon", "TODO".`;
+
+      const userPrompt = `Исходный URL клона: ${row.source_url}
+Задача пользователя: ${brief || "(не указана — проведи собственный аудит и предложи глубокую переработку)"}
+Всего файлов в клоне: ${Object.keys(files).length}
+${mcp.summary ? `\n${mcp.summary}\n` : ""}
 Пути (обрезано):
 ${fileList}
 
-Ключевые исходники:
+Ключевые исходники клона:
 ${excerpts.join("\n")}
 
-Сделай detailed refinement по ритуалу /skill:redesign. previewHtml — ПОЛНЫЙ рабочий документ.`;
+Сделай detailed refinement по /skill:redesign + /skill:design-taste-frontend-v1. previewHtml — полностью рабочий одиночный документ, готовый открыться в браузере. Мобильная версия обязательна. Никаких generic-AI-паттернов.`;
 
-      // Timeout guard — abort before the Worker kills the request.
+      // Timeout guard — Cloudflare Worker hard-limit is ~180s; abort earlier.
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 110_000);
+      const timer = setTimeout(() => ctrl.abort(), 165_000);
       let aiRes: Response;
       try {
         aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
