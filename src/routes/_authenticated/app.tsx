@@ -12,6 +12,8 @@ import {
   deleteCloneJob,
 } from "@/lib/ditto.functions";
 import { Button } from "@/components/ui/button";
+import { Logo } from "@/components/logo";
+import { McpServersCard } from "@/components/mcp-servers-card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -201,11 +203,8 @@ function AppPage() {
     <div className="min-h-screen bg-background">
       <header className="border-b border-border">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
-          <Link to="/" className="flex items-center gap-2 font-semibold">
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground text-sm">
-              D
-            </span>
-            Clone Studio
+          <Link to="/" className="shrink-0" aria-label="Clone Studio">
+            <Logo size="md" />
           </Link>
           <div className="flex items-center gap-3 text-sm">
             <span className="hidden text-muted-foreground sm:inline">{email}</span>
@@ -293,6 +292,11 @@ function AppPage() {
             </form>
           </CardContent>
         </Card>
+
+        <div className="mt-6">
+          <McpServersCard />
+        </div>
+
 
         <section className="mt-10">
           <div className="mb-4 flex items-center justify-between">
