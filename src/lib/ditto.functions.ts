@@ -1,11 +1,13 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { getActiveMcpContext } from "./mcp.functions";
+import { getActiveMcpContext, callMcpTool, loadServersWithTools } from "./mcp.functions";
+import { loadEffectiveSettings } from "./settings.functions";
 
 const DITTO_BASE = "https://api.ditto.site/v1";
 const BUCKET = "clone-artifacts";
-const REFINE_MODEL = "google/gemini-2.5-pro";
+const DEFAULT_REFINE_MODEL = "google/gemini-2.5-pro";
+
 
 const createSchema = z.object({
   url: z.string().url().max(2048),
@@ -300,7 +302,7 @@ function safeHost(u: string): string {
   }
 }
 
-// Returns files + active refinement (with previewHtml) + refinements history.
+// Returns files + active refinement (with previewHtml + tool_calls) + refinements history.
 export const getCloneFiles = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((raw: unknown) => z.object({ id: z.string().uuid() }).parse(raw))
@@ -319,7 +321,9 @@ export const getCloneFiles = createServerFn({ method: "POST" })
 
     const { data: refinements } = await (supabase as any)
       .from("clone_refinements")
-      .select("id, version, brief, audit, changes, preview_path, status, error, model, created_at")
+      .select(
+        "id, version, brief, audit, changes, preview_path, status, error, model, created_at, tool_calls, selected_tools, settings",
+      )
       .eq("job_id", row.id)
       .eq("user_id", userId)
       .order("version", { ascending: false });
@@ -342,6 +346,9 @@ export const getCloneFiles = createServerFn({ method: "POST" })
             audit: activeMeta.audit,
             changes: activeMeta.changes,
             previewHtml,
+            toolCalls: activeMeta.tool_calls ?? [],
+            selectedTools: activeMeta.selected_tools ?? [],
+            model: activeMeta.model,
           };
         }
       } catch {
@@ -361,6 +368,7 @@ export const getCloneFiles = createServerFn({ method: "POST" })
         brief: r.brief,
         model: r.model,
         created_at: r.created_at,
+        toolCallsCount: Array.isArray(r.tool_calls) ? r.tool_calls.length : 0,
         isActive: r.id === (activeMeta?.id ?? null),
       })),
     };
@@ -369,10 +377,22 @@ export const getCloneFiles = createServerFn({ method: "POST" })
 const refineSchema = z.object({
   id: z.string().uuid(),
   brief: z.string().max(4000).optional(),
+  model: z.string().min(1).max(120).optional(),
+  temperature: z.number().min(0).max(2).optional(),
+  selectedTools: z
+    .array(
+      z.object({
+        serverId: z.string().uuid(),
+        toolName: z.string().min(1).max(200),
+        args: z.record(z.any()).optional(),
+      }),
+    )
+    .max(20)
+    .optional(),
 });
 
-// Kick off a refinement: creates a version row (status=processing), then generates
-// with a fast model on a tight text budget so we stay well under Worker timeouts.
+// Kick off a refinement. Optionally runs pre-selected MCP tools first and injects
+// their results into the model context.
 export const refineClone = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((raw: unknown) => refineSchema.parse(raw))
@@ -380,6 +400,12 @@ export const refineClone = createServerFn({ method: "POST" })
     const { supabase, userId } = context;
     const lovableKey = process.env.LOVABLE_API_KEY;
     if (!lovableKey) throw new Error("LOVABLE_API_KEY не настроен");
+
+    const settings = await loadEffectiveSettings(supabase, userId);
+    const model = data.model?.trim() || settings.refine_model || DEFAULT_REFINE_MODEL;
+    const temperature =
+      typeof data.temperature === "number" ? data.temperature : settings.refine_temperature;
+    const budget = Math.max(20_000, Math.min(150_000, settings.refine_budget));
 
     const { data: row, error } = await supabase
       .from("clone_jobs")
@@ -390,7 +416,6 @@ export const refineClone = createServerFn({ method: "POST" })
     if (error || !row) throw new Error("Задача не найдена");
     if (!row.files_path) throw new Error("Клон ещё не готов");
 
-    // Next version number
     const { data: last } = await (supabase as any)
       .from("clone_refinements")
       .select("version")
@@ -400,6 +425,7 @@ export const refineClone = createServerFn({ method: "POST" })
       .maybeSingle();
     const nextVersion = ((last?.version as number | undefined) ?? 0) + 1;
     const brief = (data.brief ?? "").trim();
+    const selectedTools = data.selectedTools ?? [];
 
     const { data: refRow, error: refErr } = await (supabase as any)
       .from("clone_refinements")
@@ -409,7 +435,9 @@ export const refineClone = createServerFn({ method: "POST" })
         version: nextVersion,
         brief: brief || null,
         status: "processing",
-        model: REFINE_MODEL,
+        model,
+        selected_tools: selectedTools,
+        settings: { model, temperature, budget },
       })
       .select()
       .single();
@@ -424,7 +452,77 @@ export const refineClone = createServerFn({ method: "POST" })
       const files = await downloadFilesJson(supabase, row.files_path);
       const mcp = await getActiveMcpContext(supabase, userId);
 
-      // Bigger, smarter budget for pro model — total ≤ ~60 KB.
+      // --------- Execute selected MCP tools (best-effort, parallel) ---------
+      const toolCalls: Array<{
+        serverId: string;
+        serverName: string;
+        toolName: string;
+        args: any;
+        startedAt: string;
+        durationMs: number;
+        ok: boolean;
+        result?: any;
+        error?: string;
+      }> = [];
+
+      if (selectedTools.length > 0) {
+        const servers = await loadServersWithTools(supabase, userId);
+        const byId = new Map(servers.map((s) => [s.id, s]));
+        await Promise.all(
+          selectedTools.slice(0, 10).map(async (t) => {
+            const srv = byId.get(t.serverId);
+            const started = Date.now();
+            if (!srv) {
+              toolCalls.push({
+                serverId: t.serverId,
+                serverName: "(неизвестный сервер)",
+                toolName: t.toolName,
+                args: t.args ?? {},
+                startedAt: new Date(started).toISOString(),
+                durationMs: 0,
+                ok: false,
+                error: "Сервер не найден",
+              });
+              return;
+            }
+            const args = t.args && Object.keys(t.args).length > 0
+              ? t.args
+              : { url: row.source_url, brief: brief || undefined };
+            try {
+              const res = await callMcpTool(srv.url, srv.auth_token, t.toolName, args, 25_000);
+              toolCalls.push({
+                serverId: srv.id,
+                serverName: srv.name,
+                toolName: t.toolName,
+                args,
+                startedAt: new Date(started).toISOString(),
+                durationMs: Date.now() - started,
+                ok: true,
+                result: truncateForStore(res),
+              });
+            } catch (e: any) {
+              toolCalls.push({
+                serverId: srv.id,
+                serverName: srv.name,
+                toolName: t.toolName,
+                args,
+                startedAt: new Date(started).toISOString(),
+                durationMs: Date.now() - started,
+                ok: false,
+                error: String(e?.message ?? e).slice(0, 400),
+              });
+            }
+          }),
+        );
+
+        // Persist intermediate progress so UI can show tool calls before AI finishes.
+        await (supabase as any)
+          .from("clone_refinements")
+          .update({ tool_calls: toolCalls })
+          .eq("id", refRow.id);
+      }
+
+      // --------- Build prompt ---------
       const textEntries = Object.entries(files).filter(
         ([, v]) => typeof v?.content === "string" && (v.type ?? "text") === "text",
       );
@@ -439,34 +537,48 @@ export const refineClone = createServerFn({ method: "POST" })
       textEntries.sort((a, b) => priority(a[0]) - priority(b[0]));
 
       const excerpts: string[] = [];
-      let budget = 60_000;
+      let remaining = budget;
       for (const [path, v] of textEntries) {
         const content = (v.content ?? "").slice(0, 9_000);
         const block = `\n===== ${path} =====\n${content}\n`;
-        if (block.length > budget) continue;
+        if (block.length > remaining) continue;
         excerpts.push(block);
-        budget -= block.length;
+        remaining -= block.length;
       }
 
       const fileList = Object.keys(files).slice(0, 160).join("\n");
+
+      const toolResultsBlock =
+        toolCalls.length > 0
+          ? `\n\nРезультаты предзапущенных MCP-инструментов (используй их при аудите/переработке):\n${toolCalls
+              .map(
+                (c, i) =>
+                  `#${i + 1} ${c.serverName} · ${c.toolName} · ${
+                    c.ok ? `OK (${c.durationMs} ms)` : `FAIL: ${c.error ?? "?"}`
+                  }\nargs=${JSON.stringify(c.args).slice(0, 500)}\n${
+                    c.ok ? `result=${safeStringify(c.result).slice(0, 2000)}` : ""
+                  }`,
+              )
+              .join("\n\n")}\n`
+          : "";
 
       const systemPrompt = `Ты — старший продуктовый дизайнер и фронтенд-инженер, работающий по ритуалу /skill:redesign и /skill:design-taste-frontend-v1.
 
 Твой вкус:
 • Анти-slop. Никаких дефолтных фиолетовых/индиго градиентов, никакого Inter в display, никаких centered hero + 3 симметричных карточек, никаких "Elevate/Seamless/Unleash", никаких Jane Doe и 99.99%.
-• Типографика: display — Space Grotesk / Cabinet Grotesk / Satoshi / Geist, tracking-tight, leading-none для крупных заголовков. Body — Inter/DM Sans, max-w-[65ch], leading-relaxed. НИКАКОГО Inter для display.
-• Палитра: макс. 1 акцент, насыщенность <80%. Off-black (не #000). Zinc/slate базы. Тонированные тени, не неоновый glow. Обязательно тёмная и светлая согласованность.
-• Композиция: асимметрия по умолчанию — split-screen, offset grids, generous whitespace, bento. Никогда generic 3-column feature row. Мобильная версия — строго single-column с px-4 py-8, max-w-7xl mx-auto. Full-height секции = min-h-[100dvh], НЕ h-screen.
-• Материал: карточки только если elevation несёт смысл. Используй border-t / divide-y / negative space. rounded-[1.5rem]+ для крупных поверхностей, тонкий border, лёгкий diffusion shadow.
-• Микро-интеракции: :hover translate-y[-1px], :active scale-[0.98]. Skeleton-состояния, пустые состояния, состояния ошибок. Никаких кастомных курсоров.
-• Контент: реальные, конкретные, продуманные имена/цифры/копии, никаких "Acme/Nexus/SmartFlow". Если сохраняешь бренд клона — сохраняй его копирайт и позиционирование, только полируй.
-• Иконки — Phosphor/Radix стиль inline SVG, strokeWidth 1.5. Изображения — https://picsum.photos/seed/<slug>/W/H или https://images.unsplash.com прямые CDN-ссылки только если реально нужны.
-• Работай ТОЛЬКО в чистом HTML + Tailwind CDN + Google Fonts <link>. Никакого React, Next, alpine.js, никаких import. Разрешён небольшой vanilla JS <script> для навигации/аккордеонов/mobile-menu.
-• Обязательный минимум: sticky/floating nav с mobile-меню (hamburger + slide-down), продуманный hero (не centered, если возможно), 3–5 контентных секций с разной композицией, футер с настоящими ссылками. Мобильная адаптация обязательна — сначала mobile, потом md:/lg:.
+• Типографика: display — Space Grotesk / Cabinet Grotesk / Satoshi / Geist, tracking-tight, leading-none для крупных заголовков. Body — Inter/DM Sans, max-w-[65ch], leading-relaxed.
+• Палитра: макс. 1 акцент, насыщенность <80%. Off-black (не #000). Zinc/slate базы. Тонированные тени, не неоновый glow.
+• Композиция: асимметрия по умолчанию — split-screen, offset grids, bento. Никогда generic 3-column feature row. Мобильная версия — строго single-column с px-4 py-8. Full-height секции = min-h-[100dvh].
+• Материал: карточки только если elevation несёт смысл. rounded-[1.5rem]+, тонкий border, лёгкий diffusion shadow.
+• Микро-интеракции: :hover translate-y[-1px], :active scale-[0.98].
+• Контент: реальные, конкретные имена/цифры/копии. Если сохраняешь бренд клона — сохраняй его позиционирование, полируй.
+• Иконки — inline SVG в стиле Phosphor, strokeWidth 1.5.
+• Работай ТОЛЬКО в чистом HTML + Tailwind CDN + Google Fonts <link>. Разрешён небольшой vanilla JS <script> для навигации/аккордеонов/mobile-menu.
+• Минимум: sticky/floating nav с mobile-меню, hero, 3–5 контентных секций с разной композицией, футер. Mobile-first.
 
 Формат: Верни СТРОГО валидный JSON, БЕЗ markdown-ограждений, БЕЗ комментариев:
 {
-  "audit": "5-8 буллетов, конкретно что было слабо и почему (референсы на секции)",
+  "audit": "5-8 буллетов, конкретно что было слабо и почему",
   "changes": "5-8 буллетов, что именно ты изменил и как это улучшает продукт",
   "previewHtml": "<!doctype html>...полностью самодостаточный документ..."
 }
@@ -475,21 +587,21 @@ previewHtml обязан:
 1. Начинаться с <!doctype html>, содержать <html lang>, <head> с <meta viewport>, <title>, шрифтами и Tailwind CDN.
 2. Быть адаптивным (mobile-first), с рабочим mobile-меню.
 3. Иметь минимум 4 полноценные секции + hero + футер.
-4. Не содержать placeholder-текстов "Lorem ipsum", "Coming soon", "TODO".`;
+4. Не содержать placeholder-текстов.`;
 
       const userPrompt = `Исходный URL клона: ${row.source_url}
 Задача пользователя: ${brief || "(не указана — проведи собственный аудит и предложи глубокую переработку)"}
 Всего файлов в клоне: ${Object.keys(files).length}
-${mcp.summary ? `\n${mcp.summary}\n` : ""}
+Модель: ${model}
+${mcp.summary ? `\n${mcp.summary}\n` : ""}${toolResultsBlock}
 Пути (обрезано):
 ${fileList}
 
 Ключевые исходники клона:
 ${excerpts.join("\n")}
 
-Сделай detailed refinement по /skill:redesign + /skill:design-taste-frontend-v1. previewHtml — полностью рабочий одиночный документ, готовый открыться в браузере. Мобильная версия обязательна. Никаких generic-AI-паттернов.`;
+Сделай detailed refinement по /skill:redesign + /skill:design-taste-frontend-v1. previewHtml — полностью рабочий одиночный документ.`;
 
-      // Timeout guard — Cloudflare Worker hard-limit is ~180s; abort earlier.
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 165_000);
       let aiRes: Response;
@@ -498,7 +610,8 @@ ${excerpts.join("\n")}
           method: "POST",
           headers: { Authorization: `Bearer ${lovableKey}`, "Content-Type": "application/json" },
           body: JSON.stringify({
-            model: REFINE_MODEL,
+            model,
+            temperature,
             messages: [
               { role: "system", content: systemPrompt },
               { role: "user", content: userPrompt },
@@ -550,6 +663,7 @@ ${excerpts.join("\n")}
           preview_path: previewPath,
           status: "ready",
           error: null,
+          tool_calls: toolCalls,
         })
         .eq("id", refRow.id);
 
@@ -564,11 +678,11 @@ ${excerpts.join("\n")}
         })
         .eq("id", row.id);
 
-      return { versionId: refRow.id, version: nextVersion };
+      return { versionId: refRow.id, version: nextVersion, toolCalls };
     } catch (e: any) {
       const msg =
         e?.name === "AbortError"
-          ? "Таймаут генерации (>165с). Попробуйте сузить бриф или переключить на flash в настройках."
+          ? "Таймаут генерации (>165с). Попробуйте сузить бриф или переключить модель в настройках."
           : String(e?.message ?? e).slice(0, 500);
       await (supabase as any)
         .from("clone_refinements")
@@ -581,6 +695,25 @@ ${excerpts.join("\n")}
       throw new Error(msg);
     }
   });
+
+function truncateForStore(res: any): any {
+  try {
+    const s = JSON.stringify(res);
+    if (s.length <= 20_000) return res;
+    return { truncated: true, preview: s.slice(0, 20_000) };
+  } catch {
+    return { unserializable: true };
+  }
+}
+
+function safeStringify(v: any): string {
+  try {
+    return typeof v === "string" ? v : JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+}
+
 
 // Set which refinement version is "active" (rollback).
 export const activateRefinement = createServerFn({ method: "POST" })

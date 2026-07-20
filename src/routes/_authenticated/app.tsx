@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import {
   createCloneJob,
@@ -11,15 +11,17 @@ import {
   refineClone,
   deleteCloneJob,
 } from "@/lib/ditto.functions";
+import { listMcpServers, type McpServerRow, type McpToolInfo } from "@/lib/mcp.functions";
+import { getUserSettings, type UserSettings } from "@/lib/settings.functions";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/logo";
-import { McpServersCard } from "@/components/mcp-servers-card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -43,6 +45,8 @@ import {
   Loader2,
   Trash2,
   ExternalLink,
+  Settings2,
+  Plug,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/app")({
@@ -76,6 +80,14 @@ type Job = {
   updated_at: string;
 };
 
+const MODEL_OPTIONS = [
+  { value: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro (макс. качество)" },
+  { value: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash (быстро)" },
+  { value: "google/gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite" },
+  { value: "openai/gpt-5", label: "GPT-5 (рассуждает)" },
+  { value: "openai/gpt-5-mini", label: "GPT-5 Mini" },
+];
+
 function AppPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -85,20 +97,52 @@ function AppPage() {
   const downloadFn = useServerFn(downloadCloneBundle);
   const refineFn = useServerFn(refineClone);
   const deleteFn = useServerFn(deleteCloneJob);
+  const listMcpFn = useServerFn(listMcpServers);
+  const settingsFn = useServerFn(getUserSettings);
 
   const [email, setEmail] = useState<string | null>(null);
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? null));
   }, []);
 
+  const settingsQuery = useQuery({
+    queryKey: ["user_settings"],
+    queryFn: () => settingsFn() as Promise<UserSettings>,
+  });
+
   const [url, setUrl] = useState("");
   const [urlError, setUrlError] = useState<string | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [mode, setMode] = useState<"single" | "multi">("single");
   const [framework, setFramework] = useState<"next" | "vite">("next");
   const [styling, setStyling] = useState<"tailwind" | "css">("tailwind");
 
+  // sync from user settings once loaded
+  useEffect(() => {
+    if (settingsQuery.data) {
+      setMode(settingsQuery.data.default_mode);
+      setFramework(settingsQuery.data.default_framework);
+      setStyling(settingsQuery.data.default_styling);
+    }
+  }, [settingsQuery.data]);
+
   const [refineTarget, setRefineTarget] = useState<Job | null>(null);
   const [refineBrief, setRefineBrief] = useState("");
+  const [refineModel, setRefineModel] = useState<string>("google/gemini-2.5-pro");
+  const [refineTemp, setRefineTemp] = useState<number>(0.6);
+  const [selectedTools, setSelectedTools] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (settingsQuery.data) {
+      setRefineModel(settingsQuery.data.refine_model);
+      setRefineTemp(settingsQuery.data.refine_temperature);
+    }
+  }, [settingsQuery.data, refineTarget]);
+
+  const mcpQuery = useQuery({
+    queryKey: ["mcp_servers"],
+    queryFn: () => listMcpFn() as Promise<McpServerRow[]>,
+  });
 
   const jobsQuery = useQuery({
     queryKey: ["clone_jobs"],
@@ -115,8 +159,12 @@ function AppPage() {
   });
 
   const createMut = useMutation({
-    mutationFn: (input: { url: string; mode: "single" | "multi"; framework: "next" | "vite"; styling: "tailwind" | "css" }) =>
-      createFn({ data: input }),
+    mutationFn: (input: {
+      url: string;
+      mode: "single" | "multi";
+      framework: "next" | "vite";
+      styling: "tailwind" | "css";
+    }) => createFn({ data: input }),
     onSuccess: () => {
       toast.success("Задача на клонирование отправлена");
       setUrl("");
@@ -139,11 +187,18 @@ function AppPage() {
   });
 
   const refineMut = useMutation({
-    mutationFn: (input: { id: string; brief?: string }) => refineFn({ data: input }),
+    mutationFn: (input: {
+      id: string;
+      brief?: string;
+      model: string;
+      temperature: number;
+      selectedTools: Array<{ serverId: string; toolName: string }>;
+    }) => refineFn({ data: input }),
     onSuccess: () => {
       toast.success("AI-версия готова");
       setRefineTarget(null);
       setRefineBrief("");
+      setSelectedTools({});
       queryClient.invalidateQueries({ queryKey: ["clone_jobs"] });
     },
     onError: (e) => {
@@ -198,6 +253,25 @@ function AppPage() {
   }
 
   const jobs = (jobsQuery.data as Job[] | undefined) ?? [];
+  const mcpServers = mcpQuery.data ?? [];
+  const activeMcp = mcpServers.filter((s) => s.enabled && (s.tools?.length ?? 0) > 0);
+
+  // Flat list of all tools with server context, for the refine dialog.
+  const allTools = useMemo(() => {
+    const items: Array<{ key: string; serverId: string; serverName: string; provider: string; tool: McpToolInfo }> = [];
+    for (const s of activeMcp) {
+      for (const t of s.tools ?? []) {
+        items.push({
+          key: `${s.id}::${t.name}`,
+          serverId: s.id,
+          serverName: s.name,
+          provider: s.provider ?? "custom",
+          tool: t,
+        });
+      }
+    }
+    return items;
+  }, [activeMcp]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -206,8 +280,13 @@ function AppPage() {
           <Link to="/" className="shrink-0" aria-label="Clone Studio">
             <Logo size="md" />
           </Link>
-          <div className="flex items-center gap-3 text-sm">
+          <div className="flex items-center gap-2 text-sm">
             <span className="hidden text-muted-foreground sm:inline">{email}</span>
+            <Link to="/settings">
+              <Button variant="ghost" size="sm">
+                <Settings2 className="mr-2 h-4 w-4" /> Настройки
+              </Button>
+            </Link>
             <Button variant="outline" size="sm" onClick={onSignOut}>
               <LogOut className="mr-2 h-4 w-4" /> Выйти
             </Button>
@@ -216,14 +295,19 @@ function AppPage() {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 py-10">
-        <Card>
+        <Card className="fade-up">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Sparkles className="h-5 w-5" /> Склонировать сайт
             </CardTitle>
             <CardDescription>
-              Вставьте URL. Ditto вернёт чистый, компонентизированный код на{" "}
-              {framework === "next" ? "Next.js" : "Vite"} примерно за 5 минут.
+              Вставьте URL — получите настоящий{" "}
+              {framework === "next" ? "Next.js" : "Vite"} проект за ~5 минут.
+              Все параметры — по умолчанию из{" "}
+              <Link to="/settings" className="underline underline-offset-2">
+                настроек
+              </Link>
+              .
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -248,44 +332,71 @@ function AppPage() {
                   </p>
                 ) : null}
               </div>
-              <div className="grid gap-4 sm:grid-cols-3">
-                <div className="space-y-2">
-                  <Label>Режим</Label>
-                  <Select value={mode} onValueChange={(v) => setMode(v as any)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="single">Одна страница</SelectItem>
-                      <SelectItem value="multi">Много страниц</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Фреймворк</Label>
-                  <Select value={framework} onValueChange={(v) => setFramework(v as any)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="next">Next.js</SelectItem>
-                      <SelectItem value="vite">Vite</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Стилизация</Label>
-                  <Select value={styling} onValueChange={(v) => setStyling(v as any)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="tailwind">Tailwind</SelectItem>
-                      <SelectItem value="css">Обычный CSS</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+
+              <div className="rounded-lg border border-dashed border-border">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between px-4 py-2.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                  onClick={() => setAdvancedOpen((v) => !v)}
+                >
+                  <span className="flex items-center gap-2">
+                    <Settings2 className="h-4 w-4" />
+                    Расширенные параметры для этой задачи
+                  </span>
+                  {advancedOpen ? (
+                    <ChevronUp className="h-4 w-4" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4" />
+                  )}
+                </button>
+                {advancedOpen ? (
+                  <div className="grid gap-4 border-t border-border px-4 py-4 sm:grid-cols-3">
+                    <div className="space-y-2">
+                      <Label>Режим</Label>
+                      <Select value={mode} onValueChange={(v) => setMode(v as any)}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="single">Одна страница</SelectItem>
+                          <SelectItem value="multi">Много страниц</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Фреймворк</Label>
+                      <Select value={framework} onValueChange={(v) => setFramework(v as any)}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="next">Next.js</SelectItem>
+                          <SelectItem value="vite">Vite</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Стилизация</Label>
+                      <Select value={styling} onValueChange={(v) => setStyling(v as any)}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="tailwind">Tailwind</SelectItem>
+                          <SelectItem value="css">Обычный CSS</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="border-t border-border px-4 py-2 text-xs text-muted-foreground">
+                    {mode === "single" ? "Одна страница" : "Много страниц"} ·{" "}
+                    {framework === "next" ? "Next.js" : "Vite"} ·{" "}
+                    {styling === "tailwind" ? "Tailwind" : "CSS"}
+                  </div>
+                )}
               </div>
+
               <Button type="submit" disabled={createMut.isPending} className="w-full sm:w-auto">
                 {createMut.isPending ? "Отправка…" : "Начать клонирование"}
               </Button>
@@ -293,10 +404,29 @@ function AppPage() {
           </CardContent>
         </Card>
 
-        <div className="mt-6">
-          <McpServersCard />
+        {/* MCP context indicator */}
+        <div className="fade-up-delay-1 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3 text-xs">
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Plug className="h-3.5 w-3.5" />
+            {activeMcp.length === 0 ? (
+              <span>MCP-агенты не подключены — AI-доработка сработает и без них.</span>
+            ) : (
+              <span>
+                Подключено <span className="font-medium text-foreground">{activeMcp.length}</span>{" "}
+                MCP-серверов ·{" "}
+                <span className="font-medium text-foreground">
+                  {activeMcp.reduce((s, r) => s + (r.tools?.length ?? 0), 0)}
+                </span>{" "}
+                инструментов. Выберите нужные при запуске AI-доработки.
+              </span>
+            )}
+          </div>
+          <Link to="/settings">
+            <Button size="sm" variant="ghost">
+              Управление в настройках →
+            </Button>
+          </Link>
         </div>
-
 
         <section className="mt-10">
           <div className="mb-4 flex items-center justify-between">
@@ -325,6 +455,7 @@ function AppPage() {
                   onRefine={() => {
                     setRefineTarget(j);
                     setRefineBrief(j.refined_brief ?? "");
+                    setSelectedTools({});
                   }}
                   onPreview={() => navigate({ to: "/preview/$jobId", params: { jobId: j.id } })}
                   onDelete={() => {
@@ -346,33 +477,125 @@ function AppPage() {
           if (!o && !refineMut.isPending) {
             setRefineTarget(null);
             setRefineBrief("");
+            setSelectedTools({});
           }
         }}
       >
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Wand2 className="h-5 w-5" /> AI-доработка страницы
             </DialogTitle>
             <DialogDescription>
-              На основе полной копии сайта AI сделает детальную проработку: аудит, улучшения и готовую HTML-страницу, которую
-              можно открыть в браузере.
+              Выберите модель и MCP-инструменты, которые нужно исполнить перед генерацией. Их результаты
+              попадут в контекст модели.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="brief">Что улучшить (необязательно)</Label>
-            <Textarea
-              id="brief"
-              placeholder="Например: усилить hero, добавить социальные доказательства, сделать премиум-B2B тон, убрать generic-градиенты."
-              value={refineBrief}
-              onChange={(e) => setRefineBrief(e.target.value)}
-              rows={5}
-              maxLength={4000}
-            />
-            <p className="text-xs text-muted-foreground">
-              Можно оставить пустым — AI сам проведёт аудит и предложит правки. Обычно занимает 30–90 сек.
-            </p>
+
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-[1fr_140px]">
+              <div className="space-y-2">
+                <Label>Модель</Label>
+                <Select value={refineModel} onValueChange={setRefineModel}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {MODEL_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="temp2">Температура</Label>
+                <Input
+                  id="temp2"
+                  type="number"
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  value={refineTemp}
+                  onChange={(e) => setRefineTemp(Number(e.target.value) || 0)}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="brief">Бриф (необязательно)</Label>
+              <Textarea
+                id="brief"
+                placeholder="Например: усилить hero, добавить социальные доказательства, премиум-B2B тон."
+                value={refineBrief}
+                onChange={(e) => setRefineBrief(e.target.value)}
+                rows={4}
+                maxLength={4000}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="flex items-center gap-2">
+                  <Plug className="h-4 w-4" /> MCP-инструменты для контекста
+                </Label>
+                <span className="text-xs text-muted-foreground">
+                  {Object.values(selectedTools).filter(Boolean).length} выбрано из {allTools.length}
+                </span>
+              </div>
+              {allTools.length === 0 ? (
+                <div className="rounded-md border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">
+                  Нет активных инструментов. Подключите Omniroute или свой MCP-сервер в{" "}
+                  <Link to="/settings" className="underline">
+                    настройках
+                  </Link>
+                  .
+                </div>
+              ) : (
+                <div className="max-h-56 space-y-1 overflow-auto rounded-md border border-border p-1.5">
+                  {allTools.map((it) => (
+                    <label
+                      key={it.key}
+                      className="flex cursor-pointer items-start gap-2.5 rounded px-2 py-1.5 text-xs hover:bg-muted/60"
+                    >
+                      <Checkbox
+                        className="mt-0.5"
+                        checked={!!selectedTools[it.key]}
+                        onCheckedChange={(v) =>
+                          setSelectedTools((s) => ({ ...s, [it.key]: !!v }))
+                        }
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-medium">{it.tool.name}</span>
+                          <Badge variant="outline" className="h-4 px-1 text-[10px]">
+                            {it.serverName}
+                          </Badge>
+                          {it.provider === "omniroute" ? (
+                            <Badge className="h-4 px-1 text-[10px]" variant="secondary">
+                              omniroute
+                            </Badge>
+                          ) : null}
+                        </div>
+                        {it.tool.description ? (
+                          <div className="mt-0.5 truncate text-muted-foreground">
+                            {it.tool.description}
+                          </div>
+                        ) : null}
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Инструменты запускаются со стандартными аргументами{" "}
+                <code className="rounded bg-muted px-1 font-mono text-[10px]">{"{ url, brief }"}</code>{" "}
+                — их результаты вы увидите в предпросмотре под задачей.
+              </p>
+            </div>
           </div>
+
           <DialogFooter>
             <Button
               variant="outline"
@@ -380,15 +603,26 @@ function AppPage() {
               onClick={() => {
                 setRefineTarget(null);
                 setRefineBrief("");
+                setSelectedTools({});
               }}
             >
               Отмена
             </Button>
             <Button
               disabled={refineMut.isPending || !refineTarget}
-              onClick={() =>
-                refineTarget && refineMut.mutate({ id: refineTarget.id, brief: refineBrief.trim() || undefined })
-              }
+              onClick={() => {
+                if (!refineTarget) return;
+                const picks = allTools
+                  .filter((it) => selectedTools[it.key])
+                  .map((it) => ({ serverId: it.serverId, toolName: it.tool.name }));
+                refineMut.mutate({
+                  id: refineTarget.id,
+                  brief: refineBrief.trim() || undefined,
+                  model: refineModel,
+                  temperature: refineTemp,
+                  selectedTools: picks,
+                });
+              }}
             >
               {refineMut.isPending ? (
                 <>
@@ -537,7 +771,7 @@ function JobRow({
   const refineFailed = job.refined_status === "failed";
 
   return (
-    <Card>
+    <Card className="tile-hover">
       <CardContent className="py-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 flex-1">

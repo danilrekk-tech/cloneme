@@ -102,7 +102,10 @@ export type Database = {
           job_id: string
           model: string | null
           preview_path: string | null
+          selected_tools: Json | null
+          settings: Json | null
           status: string
+          tool_calls: Json | null
           updated_at: string
           user_id: string
           version: number
@@ -117,7 +120,10 @@ export type Database = {
           job_id: string
           model?: string | null
           preview_path?: string | null
+          selected_tools?: Json | null
+          settings?: Json | null
           status?: string
+          tool_calls?: Json | null
           updated_at?: string
           user_id: string
           version: number
@@ -132,7 +138,10 @@ export type Database = {
           job_id?: string
           model?: string | null
           preview_path?: string | null
+          selected_tools?: Json | null
+          settings?: Json | null
           status?: string
+          tool_calls?: Json | null
           updated_at?: string
           user_id?: string
           version?: number
@@ -156,6 +165,7 @@ export type Database = {
           last_checked_at: string | null
           last_error: string | null
           name: string
+          provider: string
           tools: Json | null
           transport: string
           updated_at: string
@@ -170,6 +180,7 @@ export type Database = {
           last_checked_at?: string | null
           last_error?: string | null
           name: string
+          provider?: string
           tools?: Json | null
           transport?: string
           updated_at?: string
@@ -184,10 +195,50 @@ export type Database = {
           last_checked_at?: string | null
           last_error?: string | null
           name?: string
+          provider?: string
           tools?: Json | null
           transport?: string
           updated_at?: string
           url?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_settings: {
+        Row: {
+          created_at: string
+          default_framework: string
+          default_mode: string
+          default_styling: string
+          omniroute_api_key: string | null
+          refine_budget: number
+          refine_model: string
+          refine_temperature: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          default_framework?: string
+          default_mode?: string
+          default_styling?: string
+          omniroute_api_key?: string | null
+          refine_budget?: number
+          refine_model?: string
+          refine_temperature?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          default_framework?: string
+          default_mode?: string
+          default_styling?: string
+          omniroute_api_key?: string | null
+          refine_budget?: number
+          refine_model?: string
+          refine_temperature?: number
+          updated_at?: string
           user_id?: string
         }
         Relationships: []
