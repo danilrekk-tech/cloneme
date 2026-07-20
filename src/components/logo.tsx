@@ -13,13 +13,15 @@ export function Logo({
   compact = false,
 }: {
   className?: string;
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "xl" | "hero";
   compact?: boolean;
 }) {
   const sizes = {
     sm: "text-base",
-    md: "text-lg",
-    lg: "text-2xl",
+    md: "text-xl",
+    lg: "text-3xl",
+    xl: "text-5xl",
+    hero: "text-[clamp(3.5rem,10vw,8rem)]",
   } as const;
 
   return (

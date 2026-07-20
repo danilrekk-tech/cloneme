@@ -153,15 +153,15 @@
 /* ================= Logo ================= */
 .logo-wordmark {
   font-family: var(--font-display);
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
 }
 .logo-shimmer {
   background: linear-gradient(
     100deg,
     var(--color-foreground) 0%,
-    var(--color-foreground) 30%,
-    color-mix(in oklab, var(--color-foreground) 40%, transparent) 45%,
-    var(--color-foreground) 60%,
+    var(--color-foreground) 25%,
+    color-mix(in oklab, var(--color-foreground) 30%, transparent) 45%,
+    var(--color-foreground) 65%,
     var(--color-foreground) 100%
   );
   background-size: 220% 100%;
@@ -174,8 +174,8 @@
   position: absolute;
   left: 0;
   right: 0;
-  bottom: -0.12em;
-  height: 2px;
+  bottom: -0.08em;
+  height: 0.06em;
   background: linear-gradient(90deg, transparent, currentColor 20%, currentColor 80%, transparent);
   transform: scaleX(0.15);
   transform-origin: left center;
@@ -183,8 +183,8 @@
   animation: logo-underline 4.2s cubic-bezier(0.65, 0, 0.35, 1) infinite;
 }
 .logo-dot {
-  width: 0.42em;
-  height: 0.42em;
+  width: 0.32em;
+  height: 0.32em;
   border-radius: 999px;
   background: currentColor;
   align-self: center;
@@ -204,6 +204,29 @@
   50% { opacity: 1; transform: scale(1); }
 }
 
+/* ================= Hero mega logo ================= */
+.hero-logo {
+  position: relative;
+  isolation: isolate;
+}
+.hero-logo::before {
+  content: "";
+  position: absolute;
+  inset: -20% -10%;
+  z-index: -1;
+  background: radial-gradient(
+    50% 50% at 50% 50%,
+    color-mix(in oklab, var(--color-foreground) 14%, transparent) 0%,
+    transparent 65%
+  );
+  filter: blur(30px);
+  animation: hero-halo-pulse 6s ease-in-out infinite;
+}
+@keyframes hero-halo-pulse {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.06); }
+}
+
 /* ================= Landing helpers ================= */
 .grid-pattern {
   background-image:
@@ -212,6 +235,12 @@
   background-size: 44px 44px;
   mask-image: radial-gradient(ellipse at center, black 40%, transparent 75%);
   -webkit-mask-image: radial-gradient(ellipse at center, black 40%, transparent 75%);
+}
+.dot-pattern {
+  background-image: radial-gradient(color-mix(in oklab, var(--color-foreground) 12%, transparent) 1px, transparent 1px);
+  background-size: 18px 18px;
+  mask-image: radial-gradient(ellipse at center, black 30%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 80%);
 }
 .hero-halo {
   background: radial-gradient(
@@ -231,7 +260,26 @@
 .fade-up {
   animation: fade-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
+.fade-up-delay-1 { animation: fade-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.12s both; }
+.fade-up-delay-2 { animation: fade-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.24s both; }
+.fade-up-delay-3 { animation: fade-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.36s both; }
 @keyframes fade-up {
   from { opacity: 0; transform: translateY(14px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+.float-slow {
+  animation: float-slow 7s ease-in-out infinite;
+}
+@keyframes float-slow {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+.tile-hover {
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s;
+}
+.tile-hover:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in oklab, var(--color-foreground) 25%, transparent);
 }

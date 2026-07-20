@@ -1,0 +1,362 @@
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useServerFn } from "@tanstack/react-start";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
+import {
+  getUserSettings,
+  saveUserSettings,
+  type UserSettings,
+} from "@/lib/settings.functions";
+import { activateOmniroute } from "@/lib/mcp.functions";
+import { Logo } from "@/components/logo";
+import { McpServersCard } from "@/components/mcp-servers-card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  ArrowLeft,
+  KeyRound,
+  Loader2,
+  LogOut,
+  Save,
+  Sliders,
+  Sparkles,
+  Zap,
+} from "lucide-react";
+
+export const Route = createFileRoute("/_authenticated/settings")({
+  head: () => ({
+    meta: [{ title: "Настройки — Clone Studio" }],
+  }),
+  component: SettingsPage,
+});
+
+const MODEL_OPTIONS: Array<{ value: string; label: string; hint: string }> = [
+  { value: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro", hint: "макс. качество · ~90–150с" },
+  { value: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash", hint: "быстрый · ~30–60с" },
+  { value: "google/gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite", hint: "экономичный" },
+  { value: "openai/gpt-5", label: "GPT-5", hint: "рассуждающий" },
+  { value: "openai/gpt-5-mini", label: "GPT-5 Mini", hint: "быстрый OpenAI" },
+];
+
+function SettingsPage() {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const getFn = useServerFn(getUserSettings);
+  const saveFn = useServerFn(saveUserSettings);
+  const omniFn = useServerFn(activateOmniroute);
+
+  const [email, setEmail] = useState<string | null>(null);
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? null));
+  }, []);
+
+  const q = useQuery({
+    queryKey: ["user_settings"],
+    queryFn: () => getFn() as Promise<UserSettings>,
+  });
+
+  const [form, setForm] = useState<UserSettings | null>(null);
+  useEffect(() => {
+    if (q.data && !form) setForm(q.data);
+  }, [q.data, form]);
+
+  const [omniKey, setOmniKey] = useState("");
+  useEffect(() => {
+    if (q.data?.omniroute_api_key) setOmniKey(q.data.omniroute_api_key);
+  }, [q.data?.omniroute_api_key]);
+
+  const saveMut = useMutation({
+    mutationFn: (patch: Partial<UserSettings>) => saveFn({ data: patch as any }),
+    onSuccess: () => {
+      toast.success("Настройки сохранены");
+      qc.invalidateQueries({ queryKey: ["user_settings"] });
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Ошибка сохранения"),
+  });
+
+  const omniMut = useMutation({
+    mutationFn: (key: string) => omniFn({ data: { apiKey: key } }),
+    onSuccess: (res: any) => {
+      toast.success(`Omniroute подключён · ${res?.tools?.length ?? 0} инструментов`);
+      qc.invalidateQueries({ queryKey: ["mcp_servers"] });
+      qc.invalidateQueries({ queryKey: ["user_settings"] });
+    },
+    onError: (e: any) =>
+      toast.error("Не удалось подключить Omniroute", {
+        description: String(e?.message ?? e).slice(0, 260),
+      }),
+  });
+
+  async function onSignOut() {
+    await supabase.auth.signOut();
+    navigate({ to: "/auth", replace: true });
+  }
+
+  if (!form) {
+    return (
+      <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Загрузка настроек…
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+      <header className="border-b border-border">
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
+          <div className="flex items-center gap-3">
+            <Link to="/app">
+              <Button variant="ghost" size="sm">
+                <ArrowLeft className="mr-2 h-4 w-4" /> К задачам
+              </Button>
+            </Link>
+            <div className="hidden sm:block">
+              <Logo size="md" />
+            </div>
+          </div>
+          <div className="flex items-center gap-3 text-sm">
+            <span className="hidden text-muted-foreground sm:inline">{email}</span>
+            <Button variant="outline" size="sm" onClick={onSignOut}>
+              <LogOut className="mr-2 h-4 w-4" /> Выйти
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-5xl space-y-6 px-4 py-8">
+        <div className="fade-up">
+          <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
+            Настройки
+          </p>
+          <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
+            Персонализация Clone Studio
+          </h1>
+          <p className="mt-2 max-w-2xl text-muted-foreground">
+            Дефолты клонирования, модель для AI-доработки, ключ Omniroute и подключённые MCP-агенты.
+          </p>
+        </div>
+
+        {/* ============= Omniroute ============= */}
+        <Card className="fade-up-delay-1">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Zap className="h-5 w-5" /> Omniroute API
+            </CardTitle>
+            <CardDescription>
+              Введите личный ключ Omniroute — Clone Studio подключит их MCP-сервер и загрузит список агентов
+              автоматически. Ключ хранится только у вас, в зашифрованной базе.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="space-y-2">
+              <Label htmlFor="omni">API-ключ Omniroute</Label>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  id="omni"
+                  placeholder="omr_live_…"
+                  type="password"
+                  value={omniKey}
+                  onChange={(e) => setOmniKey(e.target.value)}
+                  autoComplete="off"
+                />
+                <Button
+                  onClick={() => omniMut.mutate(omniKey.trim())}
+                  disabled={!omniKey.trim() || omniMut.isPending}
+                >
+                  {omniMut.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <KeyRound className="mr-2 h-4 w-4" />
+                  )}
+                  Подключить
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                После подключения агенты появятся в списке MCP-серверов ниже с меткой{" "}
+                <code className="rounded bg-muted px-1 font-mono">omniroute</code>.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* ============= Default clone settings ============= */}
+        <Card className="fade-up-delay-2">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Sliders className="h-5 w-5" /> Дефолты клонирования
+            </CardTitle>
+            <CardDescription>
+              Эти значения подставляются в форму на главной. Их можно переопределить в «Расширенных
+              настройках» при создании задачи.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="space-y-2">
+                <Label>Режим</Label>
+                <Select
+                  value={form.default_mode}
+                  onValueChange={(v) => setForm({ ...form, default_mode: v as any })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="single">Одна страница</SelectItem>
+                    <SelectItem value="multi">Много страниц</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Фреймворк</Label>
+                <Select
+                  value={form.default_framework}
+                  onValueChange={(v) => setForm({ ...form, default_framework: v as any })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="next">Next.js</SelectItem>
+                    <SelectItem value="vite">Vite</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Стилизация</Label>
+                <Select
+                  value={form.default_styling}
+                  onValueChange={(v) => setForm({ ...form, default_styling: v as any })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="tailwind">Tailwind</SelectItem>
+                    <SelectItem value="css">Обычный CSS</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* ============= Default refine settings ============= */}
+        <Card className="fade-up-delay-3">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5" /> Дефолты AI-доработки
+            </CardTitle>
+            <CardDescription>
+              Модель, температура и контекст-бюджет по умолчанию для запуска refine. Каждую задачу можно
+              переопределить.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="space-y-2 sm:col-span-3">
+                <Label>Модель</Label>
+                <Select
+                  value={form.refine_model}
+                  onValueChange={(v) => setForm({ ...form, refine_model: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {MODEL_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        <span className="flex flex-col">
+                          <span className="font-medium">{o.label}</span>
+                          <span className="text-xs text-muted-foreground">{o.hint}</span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="temp">Температура</Label>
+                <Input
+                  id="temp"
+                  type="number"
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  value={form.refine_temperature}
+                  onChange={(e) =>
+                    setForm({ ...form, refine_temperature: Number(e.target.value) || 0 })
+                  }
+                />
+                <p className="text-xs text-muted-foreground">0.6 — сбалансированно</p>
+              </div>
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="budget">Контекст-бюджет (символов)</Label>
+                <Input
+                  id="budget"
+                  type="number"
+                  min={20000}
+                  max={150000}
+                  step={5000}
+                  value={form.refine_budget}
+                  onChange={(e) =>
+                    setForm({ ...form, refine_budget: Number(e.target.value) || 60000 })
+                  }
+                />
+                <p className="text-xs text-muted-foreground">
+                  Больше — качественнее аудит, но медленнее (60 000 — оптимум).
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="flex justify-end">
+          <Button
+            size="lg"
+            onClick={() =>
+              saveMut.mutate({
+                default_mode: form.default_mode,
+                default_framework: form.default_framework,
+                default_styling: form.default_styling,
+                refine_model: form.refine_model,
+                refine_temperature: form.refine_temperature,
+                refine_budget: form.refine_budget,
+              })
+            }
+            disabled={saveMut.isPending}
+          >
+            {saveMut.isPending ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="mr-2 h-4 w-4" />
+            )}
+            Сохранить настройки
+          </Button>
+        </div>
+
+        {/* ============= MCP-серверы ============= */}
+        <div className="fade-up-delay-3">
+          <McpServersCard />
+        </div>
+      </main>
+    </div>
+  );
+}
