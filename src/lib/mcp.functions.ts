@@ -562,7 +562,7 @@ export type ToolCallEntry = {
   serverId: string;
   serverName: string;
   toolName: string;
-  args: Record<string, unknown>;
+  args: Record<string, any>;
   ok: boolean;
   ms: number;
   output?: string;
