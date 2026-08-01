@@ -380,3 +380,269 @@ export async function loadServersWithTools(
     tools: Array.isArray(r.tools) ? r.tools : [],
   }));
 }
+
+/* ==========================================================================
+ * Расширенная диагностика MCP
+ * ======================================================================== */
+
+export type DiagStep = {
+  key: string;
+  label: string;
+  status: "ok" | "fail" | "warn" | "skip";
+  detail: string;
+  ms?: number;
+};
+
+export type DiagResult = {
+  ok: boolean;
+  steps: DiagStep[];
+  tools: McpToolInfo[];
+  hint?: string;
+};
+
+function classifyMcpError(e: unknown): { detail: string; hint: string } {
+  const raw = String((e as any)?.message ?? e ?? "");
+  const low = raw.toLowerCase();
+  if (low.includes("abort") || low.includes("timeout"))
+    return {
+      detail: "Таймаут: сервер не ответил вовремя.",
+      hint: "Проверьте, что агент запущен и доступен из интернета (для локального Omniroute нужен туннель, например ngrok).",
+    };
+  if (low.includes("fetch failed") || low.includes("failed to fetch") || low.includes("enotfound") || low.includes("dns"))
+    return {
+      detail: "Не удалось установить соединение с endpoint.",
+      hint: "Проверьте адрес. localhost/127.0.0.1 недоступны с сервера — используйте публичный туннель.",
+    };
+  if (/\b401\b/.test(raw) || low.includes("unauthorized"))
+    return { detail: "401 Unauthorized — bearer-token отклонён.", hint: "Проверьте API-ключ и его срок действия." };
+  if (/\b403\b/.test(raw) || low.includes("forbidden"))
+    return { detail: "403 Forbidden — недостаточно прав у ключа.", hint: "Выдайте ключу доступ к MCP-инструментам." };
+  if (/\b404\b/.test(raw))
+    return { detail: "404 — по этому пути нет MCP-эндпоинта.", hint: "Обычно путь заканчивается на /mcp." };
+  if (/\b406\b/.test(raw))
+    return { detail: "406 — сервер не принял заголовок Accept.", hint: "Сервер не поддерживает Streamable HTTP." };
+  if (/\b5\d{2}\b/.test(raw)) return { detail: raw.slice(0, 200), hint: "Ошибка на стороне MCP-сервера, попробуйте позже." };
+  return { detail: raw.slice(0, 240) || "Неизвестная ошибка", hint: "Проверьте endpoint и токен." };
+}
+
+const diagSchema = z.object({
+  id: z.string().uuid().optional(),
+  url: z.string().max(1024).optional(),
+  auth_token: z.string().max(4000).optional().nullable(),
+});
+
+export const diagnoseMcpServer = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((raw: unknown) => diagSchema.parse(raw ?? {}))
+  .handler(async ({ data, context }): Promise<DiagResult> => {
+    const { supabase, userId } = context;
+    let url = data.url?.trim() ?? "";
+    let token = data.auth_token?.trim() || null;
+    let rowId: string | null = null;
+
+    if (data.id) {
+      const { data: row } = await (supabase as any)
+        .from("mcp_servers")
+        .select("id, url, auth_token")
+        .eq("id", data.id)
+        .eq("user_id", userId)
+        .single();
+      if (!row) throw new Error("Сервер не найден");
+      rowId = row.id;
+      url = row.url;
+      token = row.auth_token;
+    }
+
+    const steps: DiagStep[] = [];
+    let hint: string | undefined;
+
+    // 1. URL
+    let parsed: URL | null = null;
+    try {
+      parsed = new URL(url);
+    } catch {
+      /* ignore */
+    }
+    if (!parsed || !/^https?:$/.test(parsed.protocol)) {
+      steps.push({ key: "url", label: "Адрес endpoint", status: "fail", detail: "Некорректный URL. Ожидается https://…/mcp" });
+      return { ok: false, steps, tools: [], hint: "Укажите полный адрес MCP-эндпоинта." };
+    }
+    const local = /^(localhost|127\.|0\.0\.0\.0|\[::1\])/i.test(parsed.hostname);
+    steps.push({
+      key: "url",
+      label: "Адрес endpoint",
+      status: local ? "warn" : "ok",
+      detail: local
+        ? `${parsed.origin}${parsed.pathname} — локальный адрес. Сервер Clone Studio не сможет к нему подключиться, нужен туннель.`
+        : `${parsed.origin}${parsed.pathname}`,
+    });
+
+    // 2. Токен
+    steps.push({
+      key: "token",
+      label: "Bearer-token",
+      status: token ? "ok" : "warn",
+      detail: token
+        ? `Передаётся, длина ${token.length} символов (${token.slice(0, 4)}…)`
+        : "Не задан — попробуем подключиться без авторизации.",
+    });
+
+    // 3. Handshake
+    const t0 = Date.now();
+    try {
+      const init = await mcpRequest(url, token, "initialize", {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "clone-studio", version: "0.3.0" },
+      });
+      steps.push({
+        key: "handshake",
+        label: "Подключение (initialize)",
+        status: "ok",
+        ms: Date.now() - t0,
+        detail: init?.serverInfo?.name
+          ? `Сервер: ${init.serverInfo.name} ${init.serverInfo.version ?? ""}`.trim()
+          : "Рукопожатие выполнено",
+      });
+    } catch (e) {
+      const c = classifyMcpError(e);
+      steps.push({ key: "handshake", label: "Подключение (initialize)", status: "fail", ms: Date.now() - t0, detail: c.detail });
+      steps.push({ key: "tools", label: "Список инструментов", status: "skip", detail: "Пропущено — нет соединения." });
+      if (rowId) {
+        await (supabase as any)
+          .from("mcp_servers")
+          .update({ last_error: c.detail, last_checked_at: new Date().toISOString() })
+          .eq("id", rowId);
+      }
+      return { ok: false, steps, tools: [], hint: c.hint };
+    }
+
+    // 4. tools/list
+    const t1 = Date.now();
+    try {
+      const result = await mcpRequest(url, token, "tools/list", {});
+      const tools: McpToolInfo[] = ((result?.tools ?? []) as any[]).map((t) => ({
+        name: String(t.name ?? ""),
+        description: typeof t.description === "string" ? t.description : undefined,
+        inputSchema: t.inputSchema ?? undefined,
+      }));
+      steps.push({
+        key: "tools",
+        label: "Список инструментов",
+        status: tools.length > 0 ? "ok" : "warn",
+        ms: Date.now() - t1,
+        detail: tools.length > 0 ? `Доступно ${tools.length} инструментов` : "Сервер отвечает, но не отдал ни одного инструмента.",
+      });
+      if (tools.length === 0) hint = "Проверьте права ключа — агент может не публиковать инструменты для этого токена.";
+      if (rowId) {
+        await (supabase as any)
+          .from("mcp_servers")
+          .update({ tools, last_error: null, last_checked_at: new Date().toISOString() })
+          .eq("id", rowId);
+      }
+      return { ok: true, steps, tools, hint };
+    } catch (e) {
+      const c = classifyMcpError(e);
+      steps.push({ key: "tools", label: "Список инструментов", status: "fail", ms: Date.now() - t1, detail: c.detail });
+      if (rowId) {
+        await (supabase as any)
+          .from("mcp_servers")
+          .update({ last_error: c.detail, last_checked_at: new Date().toISOString() })
+          .eq("id", rowId);
+      }
+      return { ok: false, steps, tools: [], hint: c.hint };
+    }
+  });
+
+/* ==========================================================================
+ * Пробный прогон MCP-инструментов (таймлайн до refine)
+ * ======================================================================== */
+
+export type ToolCallEntry = {
+  serverId: string;
+  serverName: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  ok: boolean;
+  ms: number;
+  output?: string;
+  error?: string;
+  startedAt: string;
+};
+
+const runSchema = z.object({
+  url: z.string().max(2048).optional(),
+  brief: z.string().max(4000).optional(),
+  selected: z
+    .array(
+      z.object({
+        serverId: z.string().uuid(),
+        toolName: z.string().min(1).max(200),
+        args: z.record(z.any()).optional(),
+      }),
+    )
+    .min(1)
+    .max(12),
+});
+
+export const runMcpToolsPreview = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((raw: unknown) => runSchema.parse(raw))
+  .handler(async ({ data, context }): Promise<{ calls: ToolCallEntry[] }> => {
+    const { supabase, userId } = context;
+    const servers = await loadServersWithTools(supabase, userId);
+    const byId = new Map(servers.map((s) => [s.id, s]));
+
+    const calls = await Promise.all(
+      data.selected.map(async (sel): Promise<ToolCallEntry> => {
+        const srv = byId.get(sel.serverId);
+        const startedAt = new Date().toISOString();
+        const args = sel.args ?? { url: data.url ?? "", brief: data.brief ?? "" };
+        if (!srv) {
+          return {
+            serverId: sel.serverId,
+            serverName: "неизвестный сервер",
+            toolName: sel.toolName,
+            args,
+            ok: false,
+            ms: 0,
+            error: "Сервер не найден или отключён",
+            startedAt,
+          };
+        }
+        const t = Date.now();
+        try {
+          const res = await callMcpTool(srv.url, srv.auth_token, sel.toolName, args);
+          const text =
+            Array.isArray(res?.content)
+              ? res.content
+                  .map((c: any) => (typeof c?.text === "string" ? c.text : JSON.stringify(c)))
+                  .join("\n")
+              : JSON.stringify(res);
+          return {
+            serverId: srv.id,
+            serverName: srv.name,
+            toolName: sel.toolName,
+            args,
+            ok: true,
+            ms: Date.now() - t,
+            output: String(text ?? "").slice(0, 6000),
+            startedAt,
+          };
+        } catch (e) {
+          return {
+            serverId: srv.id,
+            serverName: srv.name,
+            toolName: sel.toolName,
+            args,
+            ok: false,
+            ms: Date.now() - t,
+            error: classifyMcpError(e).detail,
+            startedAt,
+          };
+        }
+      }),
+    );
+
+    return { calls };
+  });
