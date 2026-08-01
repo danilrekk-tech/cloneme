@@ -11,7 +11,15 @@ import {
   refineClone,
   deleteCloneJob,
 } from "@/lib/ditto.functions";
-import { listMcpServers, type McpServerRow, type McpToolInfo } from "@/lib/mcp.functions";
+import {
+  listMcpServers,
+  runMcpToolsPreview,
+  type McpServerRow,
+  type McpToolInfo,
+  type ToolCallEntry,
+} from "@/lib/mcp.functions";
+import { AI_PRESETS, getPreset } from "@/lib/ai-presets";
+import { McpToolTimeline } from "@/components/mcp-tool-timeline";
 import { getUserSettings, type UserSettings } from "@/lib/settings.functions";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/logo";
@@ -47,6 +55,9 @@ import {
   ExternalLink,
   Settings2,
   Plug,
+  PlugZap,
+  Play,
+  Bot,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/app")({
@@ -131,6 +142,9 @@ function AppPage() {
   const [refineModel, setRefineModel] = useState<string>("google/gemini-2.5-pro");
   const [refineTemp, setRefineTemp] = useState<number>(0.6);
   const [selectedTools, setSelectedTools] = useState<Record<string, boolean>>({});
+  const [presetId, setPresetId] = useState<string>("none");
+  const [toolCalls, setToolCalls] = useState<ToolCallEntry[]>([]);
+  const runToolsFn = useServerFn(runMcpToolsPreview);
 
   useEffect(() => {
     if (settingsQuery.data) {
@@ -138,6 +152,33 @@ function AppPage() {
       setRefineTemp(settingsQuery.data.refine_temperature);
     }
   }, [settingsQuery.data, refineTarget]);
+
+  const runToolsMut = useMutation({
+    mutationFn: (input: {
+      url?: string;
+      brief?: string;
+      selected: Array<{ serverId: string; toolName: string }>;
+    }) => runToolsFn({ data: input }) as Promise<{ calls: ToolCallEntry[] }>,
+    onSuccess: (res) => {
+      setToolCalls(res.calls);
+      const failed = res.calls.filter((c) => !c.ok).length;
+      if (failed === 0) toast.success(`Выполнено инструментов: ${res.calls.length}`);
+      else toast.warning(`Готово, но ${failed} вызов(ов) с ошибкой — раскройте детали в таймлайне`);
+    },
+    onError: (e: any) =>
+      toast.error("Не удалось выполнить инструменты", {
+        description: String(e?.message ?? e).slice(0, 240),
+      }),
+  });
+
+  function applyPreset(id: string) {
+    setPresetId(id);
+    const p = getPreset(id === "none" ? null : id);
+    if (!p) return;
+    setRefineBrief(p.brief);
+    setRefineModel(p.model);
+    setRefineTemp(p.temperature);
+  }
 
   const mcpQuery = useQuery({
     queryKey: ["mcp_servers"],
@@ -199,6 +240,8 @@ function AppPage() {
       setRefineTarget(null);
       setRefineBrief("");
       setSelectedTools({});
+      setToolCalls([]);
+      setPresetId("none");
       queryClient.invalidateQueries({ queryKey: ["clone_jobs"] });
     },
     onError: (e) => {
@@ -282,9 +325,16 @@ function AppPage() {
           </Link>
           <div className="flex items-center gap-2 text-sm">
             <span className="hidden text-muted-foreground sm:inline">{email}</span>
+            <Link to="/integrations">
+              <Button variant="ghost" size="sm">
+                <PlugZap className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Интеграции</span>
+              </Button>
+            </Link>
             <Link to="/settings">
               <Button variant="ghost" size="sm">
-                <Settings2 className="mr-2 h-4 w-4" /> Настройки
+                <Settings2 className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Настройки</span>
               </Button>
             </Link>
             <Button variant="outline" size="sm" onClick={onSignOut}>
@@ -478,6 +528,8 @@ function AppPage() {
             setRefineTarget(null);
             setRefineBrief("");
             setSelectedTools({});
+            setToolCalls([]);
+            setPresetId("none");
           }
         }}
       >
@@ -492,7 +544,34 @@ function AppPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4">
+          <div className="max-h-[70vh] space-y-4 overflow-y-auto pr-1">
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                <Bot className="h-4 w-4" /> Готовый AI-профиль
+              </Label>
+              <Select value={presetId} onValueChange={applyPreset}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Без профиля" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Без профиля — свой бриф</SelectItem>
+                  {AI_PRESETS.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      <span className="flex flex-col">
+                        <span className="font-medium">{p.name}</span>
+                        <span className="text-xs text-muted-foreground">{p.tagline}</span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {getPreset(presetId === "none" ? null : presetId) ? (
+                <p className="text-xs text-muted-foreground">
+                  {getPreset(presetId)!.description}
+                </p>
+              ) : null}
+            </div>
+
             <div className="grid gap-3 sm:grid-cols-[1fr_140px]">
               <div className="space-y-2">
                 <Label>Модель</Label>
@@ -591,8 +670,43 @@ function AppPage() {
               <p className="text-xs text-muted-foreground">
                 Инструменты запускаются со стандартными аргументами{" "}
                 <code className="rounded bg-muted px-1 font-mono text-[10px]">{"{ url, brief }"}</code>{" "}
-                — их результаты вы увидите в предпросмотре под задачей.
+                — их результаты попадут в контекст модели.
               </p>
+
+              {allTools.length > 0 ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={
+                    runToolsMut.isPending ||
+                    Object.values(selectedTools).filter(Boolean).length === 0
+                  }
+                  onClick={() => {
+                    const picks = allTools
+                      .filter((it) => selectedTools[it.key])
+                      .map((it) => ({ serverId: it.serverId, toolName: it.tool.name }));
+                    runToolsMut.mutate({
+                      url: refineTarget?.source_url,
+                      brief: refineBrief || undefined,
+                      selected: picks,
+                    });
+                  }}
+                >
+                  {runToolsMut.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Play className="mr-2 h-4 w-4" />
+                  )}
+                  Пробный прогон инструментов
+                </Button>
+              ) : null}
+
+              <McpToolTimeline
+                calls={toolCalls}
+                running={runToolsMut.isPending}
+                title="Вызовы MCP-инструментов до refine"
+              />
             </div>
           </div>
 
