@@ -1,36 +1,42 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/logo";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   ArrowRight,
   Boxes,
-  Gauge,
-  Sparkles,
-  Code2,
-  Wand2,
-  Plug,
-  Github,
-  Menu,
-  X,
+  Braces,
   Check,
+  Download,
+  FileCode2,
+  GitCompare,
+  History,
+  Layers,
+  Plug,
+  Rocket,
+  ShieldCheck,
+  Sparkles,
+  Terminal,
+  Wand2,
+  Zap,
 } from "lucide-react";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Clone Studio — клонирование сайтов и AI-доработка" },
+      { title: "Clone Studio — копия сайта и AI-редизайн за минуты" },
       {
         name: "description",
         content:
-          "Вставьте URL — получите чистый Next.js или Vite проект за минуты. AI-доработка на базе полной копии сайта. Подключение сторонних агентов через MCP (Omniroute).",
+          "Заберите полную копию любого сайта, соберите на её основе улучшенную AI-версию, сравните построчно и скачайте ZIP. Подключайте своих агентов по MCP и Omniroute.",
       },
-      { property: "og:title", content: "Clone Studio — клонирование сайтов и AI-доработка" },
+      { property: "og:title", content: "Clone Studio — копия сайта и AI-редизайн" },
       {
         property: "og:description",
         content:
-          "Вставьте URL — получите чистый Next.js или Vite проект за минуты. AI-доработка на базе полной копии. Подключение MCP-агентов.",
+          "Полная копия сайта, AI-доработка с версионированием, diff и экспорт в ZIP. MCP-агенты и Omniroute на борту.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -39,442 +45,308 @@ export const Route = createFileRoute("/")({
   component: Landing,
 });
 
-function Landing() {
-  const [signedIn, setSignedIn] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
+const PIPELINE = [
+  {
+    icon: Terminal,
+    step: "01",
+    title: "Забираем оригинал",
+    text: "Отдаёте ссылку — движок обходит страницу, вытягивает разметку, стили, скрипты и медиа в структурированное дерево файлов.",
+  },
+  {
+    icon: Layers,
+    step: "02",
+    title: "Раскладываем по полкам",
+    text: "Копия попадает в приватное хранилище: манифест файлов, размеры, исходники доступны прямо в браузере без скачивания.",
+  },
+  {
+    icon: Wand2,
+    step: "03",
+    title: "Пересобираем с AI",
+    text: "Модель читает реальный код страницы, а не скриншот: правит иерархию, типографику, сетку, отклик и доступность.",
+  },
+  {
+    icon: GitCompare,
+    step: "04",
+    title: "Сверяете и забираете",
+    text: "Построчный diff, история версий, откат в один клик и ZIP со всеми связанными файлами вместе с новым HTML.",
+  },
+];
 
+const FEATURES = [
+  {
+    icon: FileCode2,
+    title: "Копия целиком",
+    text: "Не «похожая вёрстка», а фактический набор файлов страницы с путями и размерами.",
+  },
+  {
+    icon: History,
+    title: "Версии и откат",
+    text: "Каждая AI-доработка сохраняется отдельной версией. Активируйте любую, старые остаются на месте.",
+  },
+  {
+    icon: GitCompare,
+    title: "Diff по строкам",
+    text: "Видно, что именно поменяла модель в разметке — без догадок и «доверься мне».",
+  },
+  {
+    icon: Download,
+    title: "ZIP одной кнопкой",
+    text: "Исходники, preview.html и README со списком изменений — готово к передаче разработчику.",
+  },
+  {
+    icon: Plug,
+    title: "MCP-агенты",
+    text: "Подключайте сторонние MCP-серверы и выбирайте конкретные tools для конкретной задачи.",
+  },
+  {
+    icon: Zap,
+    title: "Omniroute по ключу",
+    text: "Свои локальные агенты Omniroute — через API-ключ и публичный endpoint туннеля.",
+  },
+];
+
+const PRESETS = [
+  "Модернизация 2026",
+  "Конверсия и оффер",
+  "Премиум-бренд",
+  "Mobile-first",
+  "SEO и доступность",
+  "Скорость загрузки",
+];
+
+function Landing() {
+  const [authed, setAuthed] = useState(false);
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSignedIn(!!data.session));
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSignedIn(!!s));
-    return () => sub.subscription.unsubscribe();
+    supabase.auth.getUser().then(({ data }) => setAuthed(!!data.user));
   }, []);
 
-  const ctaTo = signedIn ? "/app" : "/auth";
-  const ctaLabel = signedIn ? "Открыть Clone Studio" : "Начать бесплатно";
+  const cta = authed ? "/app" : "/auth";
 
   return (
-    <div className="min-h-[100dvh] bg-background text-foreground">
-      {/* ============= NAV ============= */}
+    <div className="min-h-screen bg-background">
+      {/* NAV */}
       <header className="sticky top-0 z-40 border-b border-border/60 bg-background/70 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3.5 sm:py-4">
-          <Link to="/" className="shrink-0" aria-label="Clone Studio">
-            <Logo size="md" />
-          </Link>
-
-          <nav className="hidden items-center gap-7 text-sm text-muted-foreground md:flex">
-            <a href="#how" className="transition-colors hover:text-foreground">
-              Как работает
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+          <Logo size="md" />
+          <nav className="hidden items-center gap-6 text-sm text-muted-foreground md:flex">
+            <a href="#pipeline" className="transition-colors hover:text-foreground">
+              Как это работает
             </a>
             <a href="#features" className="transition-colors hover:text-foreground">
               Возможности
             </a>
-            <a href="#mcp" className="transition-colors hover:text-foreground">
-              MCP-агенты
-            </a>
-            <a
-              href="https://github.com/ion-design/ditto.site"
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 transition-colors hover:text-foreground"
-            >
-              <Github className="h-3.5 w-3.5" /> GitHub
+            <a href="#agents" className="transition-colors hover:text-foreground">
+              Агенты
             </a>
           </nav>
-
-          <div className="flex items-center gap-2">
-            <Link to={ctaTo} className="hidden sm:block">
-              <Button size="sm" className="rounded-full px-4">
-                {signedIn ? "Открыть" : "Войти"}
-                <ArrowRight className="ml-1 h-3.5 w-3.5" />
-              </Button>
-            </Link>
-            <button
-              type="button"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border md:hidden"
-              onClick={() => setMenuOpen((v) => !v)}
-              aria-label="Меню"
-            >
-              {menuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
-            </button>
-          </div>
+          <Link to={cta}>
+            <Button size="sm">
+              {authed ? "В рабочую область" : "Начать"}
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
+          </Link>
         </div>
-        {menuOpen && (
-          <div className="border-t border-border/60 bg-background md:hidden">
-            <nav className="mx-auto flex max-w-6xl flex-col px-4 py-3 text-sm">
-              <a
-                href="#how"
-                onClick={() => setMenuOpen(false)}
-                className="py-2.5 text-foreground/80 transition-colors hover:text-foreground"
-              >
-                Как работает
-              </a>
-              <a
-                href="#features"
-                onClick={() => setMenuOpen(false)}
-                className="py-2.5 text-foreground/80 transition-colors hover:text-foreground"
-              >
-                Возможности
-              </a>
-              <a
-                href="#mcp"
-                onClick={() => setMenuOpen(false)}
-                className="py-2.5 text-foreground/80 transition-colors hover:text-foreground"
-              >
-                MCP-агенты
-              </a>
-              <a
-                href="https://github.com/ion-design/ditto.site"
-                target="_blank"
-                rel="noreferrer"
-                className="py-2.5 text-foreground/80"
-              >
-                GitHub
-              </a>
-              <Link to={ctaTo} onClick={() => setMenuOpen(false)}>
-                <Button className="mt-2 w-full">{ctaLabel}</Button>
-              </Link>
-            </nav>
-          </div>
-        )}
       </header>
 
-      {/* ============= HERO ============= */}
-      <section className="relative overflow-hidden">
-        <div className="pointer-events-none absolute inset-0 grid-pattern" aria-hidden />
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-[600px] hero-halo" aria-hidden />
+      {/* HERO */}
+      <section className="relative overflow-hidden border-b border-border">
+        <div className="grid-pattern absolute inset-0 opacity-[0.35]" aria-hidden="true" />
+        <div className="hero-halo absolute inset-0" aria-hidden="true" />
+        <div className="relative mx-auto max-w-6xl px-4 pb-20 pt-16 text-center sm:pt-24">
+          <Badge variant="outline" className="fade-up mb-8 gap-2 py-1.5 text-xs">
+            <Sparkles className="h-3.5 w-3.5 text-primary" />
+            Копия сайта → разбор → новая версия
+          </Badge>
 
-        <div className="mx-auto max-w-6xl px-4 pb-16 pt-16 sm:pt-24 lg:pt-28">
-          <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_420px] lg:gap-16">
-            <div className="fade-up">
-              <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-background/60 px-3 py-1 text-xs text-muted-foreground backdrop-blur">
-                <span className="inline-flex h-1.5 w-1.5 rounded-full bg-foreground animate-pulse" />
-                Открытая версия · движок ditto
-              </div>
-              <h1 className="font-display text-[2.5rem] font-semibold leading-[0.98] tracking-tight sm:text-6xl lg:text-[4.5rem]">
-                Клонируйте любой сайт.
-                <br />
-                <span className="text-muted-foreground">Улучшайте с AI-агентами.</span>
-              </h1>
-              <p className="mt-6 max-w-xl text-base text-muted-foreground sm:text-lg">
-                Вставьте URL — получите настоящий, компонентизированный проект на Next.js или Vite за ~5 минут.
-                Затем запустите AI-доработку по вашему брифу с подключением сторонних агентов через MCP
-                (в том числе Omniroute).
-              </p>
-              <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-                <Link to={ctaTo} className="w-full sm:w-auto">
-                  <Button size="lg" className="group w-full rounded-full px-6 sm:w-auto">
-                    {ctaLabel}
-                    <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-                  </Button>
-                </Link>
-                <a href="#how" className="w-full sm:w-auto">
-                  <Button size="lg" variant="outline" className="w-full rounded-full px-6 sm:w-auto">
-                    Как это работает
-                  </Button>
-                </a>
-              </div>
-              <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-muted-foreground">
-                <span className="inline-flex items-center gap-1.5">
-                  <Check className="h-3.5 w-3.5" /> Без vendor lock-in
-                </span>
-                <span className="inline-flex items-center gap-1.5">
-                  <Check className="h-3.5 w-3.5" /> Скачивание ZIP
-                </span>
-                <span className="inline-flex items-center gap-1.5">
-                  <Check className="h-3.5 w-3.5" /> Версионирование правок
-                </span>
-                <span className="inline-flex items-center gap-1.5">
-                  <Check className="h-3.5 w-3.5" /> MCP-совместимость
-                </span>
-              </div>
-            </div>
-
-            {/* Terminal-ish preview card */}
-            <div className="fade-up rounded-2xl border border-border bg-card/80 p-4 shadow-[0_20px_60px_-20px_rgb(0,0,0,0.15)] backdrop-blur">
-              <div className="mb-3 flex items-center gap-2 border-b border-border/60 pb-3 text-xs text-muted-foreground">
-                <span className="h-2 w-2 rounded-full bg-destructive/60" />
-                <span className="h-2 w-2 rounded-full bg-chart-4/60" />
-                <span className="h-2 w-2 rounded-full bg-chart-2/60" />
-                <span className="ml-1 font-mono">clone-studio ~ new job</span>
-              </div>
-              <pre className="overflow-x-auto rounded-lg bg-secondary/70 p-4 font-mono text-[12.5px] leading-relaxed">
-{`POST /v1/clones
-{
-  "url":     "https://stripe.com/atlas",
-  "options": { "framework": "next",
-               "styling":   "tailwind" }
-}
-
-→ 202  { jobId: "clone_7f2a…" }
-   status: queued  →  fetching
-                   →  parsing
-                   →  ✓ ready  (48 files · 312 KB)
-
-▸ refine  ⌘ /skill:redesign
-   audit    → 6 issues
-   version  → v1  ready
-   mcp      → omniroute (12 tools)`}
-              </pre>
-            </div>
+          <div className="hero-logo fade-up mx-auto w-full">
+            <Logo size="hero" className="justify-center" />
           </div>
 
-          {/* Marquee */}
-          <div className="relative mt-16 overflow-hidden border-y border-border/60 py-4">
-            <div className="marquee-track flex w-max gap-12 text-sm text-muted-foreground/80">
-              {[...Array(2)].flatMap((_, k) =>
-                [
-                  "Next.js",
-                  "Vite",
-                  "Tailwind",
-                  "TypeScript",
-                  "Supabase",
-                  "MCP (Omniroute)",
-                  "ditto engine",
-                  "Google Gemini 2.5 Pro",
-                  "OpenRouter",
-                  "Cloudflare Workers",
-                ].map((label, i) => (
-                  <span key={`${k}-${i}`} className="flex items-center gap-2 whitespace-nowrap">
-                    <span className="h-1 w-1 rounded-full bg-foreground/40" />
-                    {label}
-                  </span>
-                )),
-              )}
-            </div>
+          <p className="fade-up-delay-1 mx-auto mt-8 max-w-2xl text-balance text-lg text-muted-foreground sm:text-xl">
+            Скопируйте чужую страницу целиком, разберите её по файлам и соберите свою — лучше.
+            Не косметика поверх скриншота, а работа по настоящему коду сайта.
+          </p>
+
+          <div className="fade-up-delay-2 mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <Link to={cta} className="w-full sm:w-auto">
+              <Button size="lg" className="w-full sm:w-auto">
+                <Rocket className="mr-2 h-4 w-4" />
+                Клонировать первый сайт
+              </Button>
+            </Link>
+            <a href="#pipeline" className="w-full sm:w-auto">
+              <Button size="lg" variant="outline" className="w-full sm:w-auto">
+                Посмотреть процесс
+              </Button>
+            </a>
+          </div>
+
+          <div className="fade-up-delay-3 mx-auto mt-12 grid max-w-3xl grid-cols-2 gap-3 sm:grid-cols-4">
+            {[
+              ["Один URL", "и весь исходник"],
+              ["N версий", "с откатом"],
+              ["Diff", "по строкам"],
+              ["MCP", "свои агенты"],
+            ].map(([a, b]) => (
+              <div
+                key={a}
+                className="rounded-xl border border-border/70 bg-card/40 px-3 py-4 backdrop-blur"
+              >
+                <div className="font-display text-lg font-semibold">{a}</div>
+                <div className="text-xs text-muted-foreground">{b}</div>
+              </div>
+            ))}
           </div>
         </div>
       </section>
 
-      {/* ============= HOW ============= */}
-      <section id="how" className="border-b border-border">
-        <div className="mx-auto max-w-6xl px-4 py-20 sm:py-28">
-          <div className="mb-14 max-w-2xl">
-            <p className="mb-3 text-xs font-medium uppercase tracking-widest text-muted-foreground">
-              Как это работает
+      {/* PIPELINE */}
+      <section id="pipeline" className="border-b border-border py-20">
+        <div className="mx-auto max-w-6xl px-4">
+          <div className="max-w-2xl">
+            <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
+              Маршрут
             </p>
-            <h2 className="font-display text-3xl font-semibold tracking-tight sm:text-5xl">
-              Три шага от ссылки до готовой страницы.
+            <h2 className="mt-2 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
+              От чужой ссылки до своей версии
+            </h2>
+            <p className="mt-3 text-muted-foreground">
+              Четыре шага, каждый виден в интерфейсе: ничего не происходит «где-то в облаке» без
+              вашего контроля.
+            </p>
+          </div>
+
+          <div className="mt-10 grid gap-4 md:grid-cols-2">
+            {PIPELINE.map((s, i) => (
+              <div
+                key={s.step}
+                className={`tile-hover relative rounded-2xl border border-border bg-card p-6 fade-up-delay-${Math.min(i, 3)}`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    <s.icon className="h-5 w-5" />
+                  </div>
+                  <span className="font-mono text-xs text-muted-foreground">{s.step}</span>
+                </div>
+                <h3 className="mt-4 font-display text-xl font-semibold">{s.title}</h3>
+                <p className="mt-2 text-sm text-muted-foreground">{s.text}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* FEATURES */}
+      <section id="features" className="border-b border-border py-20">
+        <div className="mx-auto max-w-6xl px-4">
+          <div className="max-w-2xl">
+            <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
+              Внутри
+            </p>
+            <h2 className="mt-2 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
+              Инструменты, а не демо
             </h2>
           </div>
-
-          <div className="grid gap-px overflow-hidden rounded-2xl border border-border bg-border md:grid-cols-3">
-            <Step
-              n="01"
-              title="Вставьте URL"
-              desc="Выберите фреймворк и стилизацию. Ditto парсит DOM, извлекает токены, шрифты и компоненты."
-            />
-            <Step
-              n="02"
-              title="Получите проект"
-              desc="Скачайте ZIP с настоящим TypeScript-кодом. Или откройте исходники прямо в приложении."
-            />
-            <Step
-              n="03"
-              title="Улучшите с AI"
-              desc="Gemini 2.5 Pro + MCP-агенты проведут аудит и выдадут готовую HTML-версию. Версионирование и rollback включены."
-            />
+          <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {FEATURES.map((f) => (
+              <div
+                key={f.title}
+                className="tile-hover rounded-2xl border border-border bg-card p-6"
+              >
+                <f.icon className="h-5 w-5 text-primary" />
+                <h3 className="mt-4 font-medium">{f.title}</h3>
+                <p className="mt-2 text-sm text-muted-foreground">{f.text}</p>
+              </div>
+            ))}
           </div>
         </div>
       </section>
 
-      {/* ============= FEATURES ============= */}
-      <section id="features" className="border-b border-border">
-        <div className="mx-auto grid max-w-6xl gap-6 px-4 py-20 sm:py-28 md:grid-cols-6">
-          <Feature
-            className="md:col-span-4"
-            icon={<Sparkles className="h-4 w-4" />}
-            title="Детерминированное клонирование"
-            desc="Не LLM-догадка. Один URL → один и тот же стабильный, воспроизводимый проект. Повторяющийся DOM превращается в переиспользуемые компоненты."
-            large
-          />
-          <Feature
-            className="md:col-span-2"
-            icon={<Gauge className="h-4 w-4" />}
-            title="~5 минут"
-            desc="Средняя выдача клона для одной страницы."
-          />
-          <Feature
-            className="md:col-span-2"
-            icon={<Code2 className="h-4 w-4" />}
-            title="Настоящий код"
-            desc="Типизированный TypeScript, Tailwind или CSS, SEO, роутинг."
-          />
-          <Feature
-            className="md:col-span-2"
-            icon={<Wand2 className="h-4 w-4" />}
-            title="AI-доработка"
-            desc="Gemini 2.5 Pro читает полную копию и выдаёт улучшенную версию по /skill:redesign."
-          />
-          <Feature
-            className="md:col-span-2"
-            icon={<Boxes className="h-4 w-4" />}
-            title="Версии + rollback"
-            desc="История генераций, diff между версиями, активация одним кликом."
-          />
-        </div>
-      </section>
-
-      {/* ============= MCP ============= */}
-      <section id="mcp" className="border-b border-border bg-secondary/40">
-        <div className="mx-auto grid max-w-6xl gap-12 px-4 py-20 sm:py-28 lg:grid-cols-2 lg:items-center">
+      {/* AGENTS */}
+      <section id="agents" className="border-b border-border py-20">
+        <div className="mx-auto grid max-w-6xl gap-10 px-4 lg:grid-cols-2 lg:items-center">
           <div>
-            <p className="mb-3 inline-flex items-center gap-2 text-xs font-medium uppercase tracking-widest text-muted-foreground">
-              <Plug className="h-3.5 w-3.5" /> MCP · Model Context Protocol
+            <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
+              Экосистема
             </p>
-            <h2 className="font-display text-3xl font-semibold tracking-tight sm:text-5xl">
-              Подключайте своих агентов.
-              <br />
-              <span className="text-muted-foreground">Omniroute и всё, что говорит на MCP.</span>
+            <h2 className="mt-2 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
+              Ваши агенты работают вместе с нашим
             </h2>
-            <p className="mt-5 max-w-lg text-muted-foreground">
-              Добавьте URL MCP-сервера прямо в интерфейс. Clone Studio опросит{" "}
-              <code className="rounded bg-background px-1.5 py-0.5 font-mono text-xs">tools/list</code>, покажет
-              доступные инструменты и передаст их контекст в AI-доработку — так генерация учитывает знания вашего
-              рабочего стека.
+            <p className="mt-3 text-muted-foreground">
+              Clone Studio не запирает вас в одной модели. Подключите MCP-сервер, выберите нужные
+              tools — они выполнятся перед доработкой, а их вывод попадёт в контекст. Локальный
+              Omniroute подключается личным API-ключом.
             </p>
-            <ul className="mt-6 space-y-2.5 text-sm">
+            <ul className="mt-6 space-y-3 text-sm">
               {[
-                "Streamable HTTP transport (JSON + SSE)",
-                "Bearer-токены для приватных серверов",
-                "Автоматический опрос списка инструментов",
-                "Работает с Omniroute, Linear, Notion, кастомными MCP",
+                "MCP по HTTP и SSE, bearer-токен, диагностика подключения",
+                "Выбор конкретных tools под конкретную задачу",
+                "Таймлайн вызовов: аргументы и ответы раскрываются прямо в UI",
+                "Готовые AI-профили доработки под цель — от конверсии до скорости",
               ].map((t) => (
-                <li key={t} className="flex items-start gap-2.5">
-                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-foreground" />
-                  <span className="text-foreground/80">{t}</span>
+                <li key={t} className="flex gap-3">
+                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                  <span className="text-muted-foreground">{t}</span>
                 </li>
               ))}
             </ul>
           </div>
-          <div className="rounded-2xl border border-border bg-background p-5">
-            <div className="mb-4 flex items-center justify-between text-xs">
-              <span className="font-mono text-muted-foreground">mcp_servers</span>
-              <span className="rounded-full bg-foreground/5 px-2 py-0.5 font-medium">2 активны</span>
+
+          <div className="rounded-2xl border border-border bg-card p-6">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <Boxes className="h-4 w-4 text-primary" /> Профили доработки
             </div>
-            <div className="space-y-3">
-              {[
-                { name: "Omniroute", url: "https://omniroute.dev/mcp", tools: 12, active: true },
-                { name: "Linear", url: "https://mcp.linear.app/sse", tools: 6, active: true },
-                { name: "Custom", url: "https://api.acme.io/mcp", tools: 0, active: false },
-              ].map((s) => (
-                <div
-                  key={s.name}
-                  className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3"
-                >
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 font-medium">
-                      {s.name}
-                      {s.active && (
-                        <span className="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      )}
-                    </div>
-                    <div className="truncate font-mono text-xs text-muted-foreground">{s.url}</div>
-                  </div>
-                  <span className="shrink-0 rounded-full border border-border px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
-                    {s.tools} tools
-                  </span>
-                </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {PRESETS.map((p) => (
+                <Badge key={p} variant="secondary" className="py-1">
+                  {p}
+                </Badge>
               ))}
             </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ============= CTA ============= */}
-      <section className="mx-auto max-w-6xl px-4 py-20 sm:py-28">
-        <div className="relative overflow-hidden rounded-3xl border border-border bg-card p-8 text-center sm:p-16">
-          <div className="pointer-events-none absolute inset-0 grid-pattern opacity-60" aria-hidden />
-          <div className="relative">
-            <h2 className="font-display text-3xl font-semibold tracking-tight sm:text-5xl">
-              Соберите следующий клон за минуты.
-            </h2>
-            <p className="mx-auto mt-4 max-w-xl text-muted-foreground">
-              Полная копия + AI-доработка + MCP-агенты. Всё в одном рабочем пространстве.
-            </p>
-            <div className="mt-8">
-              <Link to={ctaTo}>
-                <Button size="lg" className="rounded-full px-8">
-                  {ctaLabel}
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              </Link>
+            <div className="mt-6 rounded-xl border border-border bg-muted/40 p-4 font-mono text-xs text-muted-foreground">
+              <div className="flex items-center gap-2 text-foreground">
+                <Braces className="h-3.5 w-3.5" /> refine.run()
+              </div>
+              <div className="mt-2 space-y-1">
+                <div>→ mcp: omniroute/audit_page ✓</div>
+                <div>→ mcp: design/tokens_extract ✓</div>
+                <div>→ model: генерация preview.html ✓</div>
+                <div className="text-primary">← версия v3 сохранена</div>
+              </div>
             </div>
+            <p className="mt-4 flex items-start gap-2 text-xs text-muted-foreground">
+              <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              Ключи и артефакты хранятся приватно и доступны только вашему аккаунту.
+            </p>
           </div>
         </div>
       </section>
 
-      {/* ============= FOOTER ============= */}
-      <footer className="border-t border-border">
-        <div className="mx-auto flex max-w-6xl flex-col items-start justify-between gap-4 px-4 py-8 text-sm text-muted-foreground sm:flex-row sm:items-center">
-          <div className="flex items-center gap-3">
-            <Logo size="sm" compact />
-            <span className="hidden text-xs sm:inline">· на движке ditto</span>
-          </div>
-          <div className="flex items-center gap-5 text-xs">
-            <a
-              href="https://www.ditto.site"
-              target="_blank"
-              rel="noreferrer"
-              className="hover:text-foreground"
-            >
-              ditto.site
-            </a>
-            <a
-              href="https://modelcontextprotocol.io"
-              target="_blank"
-              rel="noreferrer"
-              className="hover:text-foreground"
-            >
-              MCP spec
-            </a>
-            <span>MIT-лицензия движка</span>
-          </div>
+      {/* CTA */}
+      <section className="relative overflow-hidden py-24">
+        <div className="dot-pattern absolute inset-0 opacity-40" aria-hidden="true" />
+        <div className="relative mx-auto max-w-3xl px-4 text-center">
+          <Logo size="xl" className="justify-center" />
+          <h2 className="mt-6 font-display text-3xl font-semibold tracking-tight sm:text-4xl">
+            Один URL — и у вас есть с чем работать
+          </h2>
+          <p className="mt-3 text-muted-foreground">
+            Регистрация занимает минуту, первый клон — меньше.
+          </p>
+          <Link to={cta} className="mt-8 inline-block">
+            <Button size="lg">
+              Начать сейчас <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
+          </Link>
+        </div>
+      </section>
+
+      <footer className="border-t border-border py-8">
+        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 text-sm text-muted-foreground sm:flex-row">
+          <Logo size="sm" />
+          <span>Клонирование, разбор и AI-доработка сайтов</span>
         </div>
       </footer>
-    </div>
-  );
-}
-
-function Step({ n, title, desc }: { n: string; title: string; desc: string }) {
-  return (
-    <div className="group relative flex flex-col gap-3 bg-background p-8 transition-colors hover:bg-card">
-      <div className="font-mono text-xs text-muted-foreground">{n}</div>
-      <h3 className="font-display text-xl font-semibold tracking-tight">{title}</h3>
-      <p className="text-sm text-muted-foreground">{desc}</p>
-    </div>
-  );
-}
-
-function Feature({
-  icon,
-  title,
-  desc,
-  large,
-  className,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  desc: string;
-  large?: boolean;
-  className?: string;
-}) {
-  return (
-    <div
-      className={
-        "flex flex-col justify-between gap-6 rounded-2xl border border-border bg-card p-6 transition-colors hover:border-foreground/20 " +
-        (large ? "sm:p-8 " : "") +
-        (className ?? "")
-      }
-    >
-      <div className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background text-foreground">
-        {icon}
-      </div>
-      <div>
-        <h3 className={"font-display font-semibold tracking-tight " + (large ? "text-2xl sm:text-3xl" : "text-lg")}>
-          {title}
-        </h3>
-        <p className={"mt-2 text-muted-foreground " + (large ? "text-base max-w-md" : "text-sm")}>{desc}</p>
-      </div>
     </div>
   );
 }
