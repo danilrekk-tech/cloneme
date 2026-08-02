@@ -91,13 +91,11 @@ type Job = {
   updated_at: string;
 };
 
-const MODEL_OPTIONS = [
-  { value: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro (макс. качество)" },
-  { value: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash (быстро)" },
-  { value: "google/gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite" },
-  { value: "openai/gpt-5", label: "GPT-5 (рассуждает)" },
-  { value: "openai/gpt-5-mini", label: "GPT-5 Mini" },
-];
+const MODEL_OPTIONS = AI_MODELS.map((m) => ({
+  value: m.id,
+  label: `${m.label} — ${m.hint}`,
+}));
+
 
 function AppPage() {
   const navigate = useNavigate();
