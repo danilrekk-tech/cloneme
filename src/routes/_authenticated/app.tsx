@@ -19,6 +19,8 @@ import {
   type ToolCallEntry,
 } from "@/lib/mcp.functions";
 import { AI_PRESETS, getPreset } from "@/lib/ai-presets";
+import { AI_MODELS, getModelInfo } from "@/lib/ai-models";
+
 import { McpToolTimeline } from "@/components/mcp-tool-timeline";
 import { getUserSettings, type UserSettings } from "@/lib/settings.functions";
 import { Button } from "@/components/ui/button";
@@ -91,13 +93,11 @@ type Job = {
   updated_at: string;
 };
 
-const MODEL_OPTIONS = [
-  { value: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro (макс. качество)" },
-  { value: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash (быстро)" },
-  { value: "google/gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite" },
-  { value: "openai/gpt-5", label: "GPT-5 (рассуждает)" },
-  { value: "openai/gpt-5-mini", label: "GPT-5 Mini" },
-];
+const MODEL_OPTIONS = AI_MODELS.map((m) => ({
+  value: m.id,
+  label: `${m.label} — ${m.hint}`,
+}));
+
 
 function AppPage() {
   const navigate = useNavigate();
@@ -141,6 +141,8 @@ function AppPage() {
   const [refineBrief, setRefineBrief] = useState("");
   const [refineModel, setRefineModel] = useState<string>("google/gemini-2.5-pro");
   const [refineTemp, setRefineTemp] = useState<number>(0.6);
+  const [refineResearch, setRefineResearch] = useState<boolean>(false);
+
   const [selectedTools, setSelectedTools] = useState<Record<string, boolean>>({});
   const [presetId, setPresetId] = useState<string>("none");
   const [toolCalls, setToolCalls] = useState<ToolCallEntry[]>([]);
@@ -150,6 +152,7 @@ function AppPage() {
     if (settingsQuery.data) {
       setRefineModel(settingsQuery.data.refine_model);
       setRefineTemp(settingsQuery.data.refine_temperature);
+      setRefineResearch(settingsQuery.data.refine_research);
     }
   }, [settingsQuery.data, refineTarget]);
 
@@ -178,7 +181,9 @@ function AppPage() {
     setRefineBrief(p.brief);
     setRefineModel(p.model);
     setRefineTemp(p.temperature);
+    if (typeof (p as any).research === "boolean") setRefineResearch((p as any).research);
   }
+
 
   const mcpQuery = useQuery({
     queryKey: ["mcp_servers"],
@@ -233,6 +238,8 @@ function AppPage() {
       brief?: string;
       model: string;
       temperature: number;
+      research?: boolean;
+
       selectedTools: Array<{ serverId: string; toolName: string }>;
     }) => refineFn({ data: input }),
     onSuccess: () => {
@@ -596,11 +603,36 @@ function AppPage() {
                   min={0}
                   max={2}
                   step={0.1}
+                  disabled={getModelInfo(refineModel)?.supportsTemperature === false}
                   value={refineTemp}
                   onChange={(e) => setRefineTemp(Number(e.target.value) || 0)}
                 />
               </div>
             </div>
+
+            {getModelInfo(refineModel)?.supportsTemperature === false ? (
+              <p className="text-xs text-amber-500">
+                Эта модель работает только со значением температуры по умолчанию — параметр будет
+                пропущен автоматически.
+              </p>
+            ) : null}
+
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 accent-primary"
+                checked={refineResearch}
+                onChange={(e) => setRefineResearch(e.target.checked)}
+              />
+              <span className="text-sm">
+                <span className="font-medium">Исследовать конкурентов перед генерацией</span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  AI изучит нишу и ближайших конкурентов, соберёт макет сильнее оригинала и только
+                  потом сгенерирует страницу. Дольше, но результат заметно лучше.
+                </span>
+              </span>
+            </label>
+
 
             <div className="space-y-2">
               <Label htmlFor="brief">Бриф (необязательно)</Label>
@@ -734,6 +766,8 @@ function AppPage() {
                   brief: refineBrief.trim() || undefined,
                   model: refineModel,
                   temperature: refineTemp,
+                  research: refineResearch,
+
                   selectedTools: picks,
                 });
               }}
