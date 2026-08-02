@@ -266,14 +266,70 @@ function SettingsPage() {
               <Sparkles className="h-5 w-5" /> Дефолты AI-доработки
             </CardTitle>
             <CardDescription>
-              Модель, температура и контекст-бюджет по умолчанию для запуска refine. Каждую задачу можно
-              переопределить.
+              Провайдер, модель, резервная модель и контекст-бюджет по умолчанию. Каждую задачу можно
+              переопределить в диалоге доработки.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="space-y-2 sm:col-span-3">
-                <Label>Модель</Label>
+                <Label>Провайдер ИИ</Label>
+                <Select
+                  value={form.refine_provider}
+                  onValueChange={(v) => setForm({ ...form, refine_provider: v as any })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="lovable">
+                      <span className="flex flex-col">
+                        <span className="font-medium">Встроенные модели (без ключа)</span>
+                        <span className="text-xs text-muted-foreground">
+                          Gemini и GPT-5 через шлюз, автоматическое переключение при лимитах
+                        </span>
+                      </span>
+                    </SelectItem>
+                    <SelectItem value="omniroute">
+                      <span className="flex flex-col">
+                        <span className="font-medium">Свой агент / Omniroute (OpenAI-совместимый)</span>
+                        <span className="text-xs text-muted-foreground">
+                          Локальный или облачный endpoint + ваш API-ключ
+                        </span>
+                      </span>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {form.refine_provider === "omniroute" ? (
+                <>
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="omnibase">Endpoint провайдера</Label>
+                    <Input
+                      id="omnibase"
+                      placeholder="http://localhost:8080/v1"
+                      value={form.omniroute_base_url ?? ""}
+                      onChange={(e) => setForm({ ...form, omniroute_base_url: e.target.value })}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Базовый URL OpenAI-совместимого API. Ключ берётся из поля Omniroute выше.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="omnimodel">Модель агента</Label>
+                    <Input
+                      id="omnimodel"
+                      placeholder="напр. llama-3.3-70b"
+                      value={form.omniroute_model ?? ""}
+                      onChange={(e) => setForm({ ...form, omniroute_model: e.target.value })}
+                    />
+                  </div>
+                </>
+              ) : null}
+
+              <div className="space-y-2 sm:col-span-3">
+                <Label>Основная модель</Label>
                 <Select
                   value={form.refine_model}
                   onValueChange={(v) => setForm({ ...form, refine_model: v })}
@@ -292,7 +348,51 @@ function SettingsPage() {
                     ))}
                   </SelectContent>
                 </Select>
+                {getModelInfo(form.refine_model)?.supportsTemperature === false ? (
+                  <p className="text-xs text-amber-500">
+                    Эта модель не принимает температуру — параметр будет проигнорирован автоматически.
+                  </p>
+                ) : null}
               </div>
+
+              <div className="space-y-2 sm:col-span-3">
+                <Label>Резервная модель</Label>
+                <Select
+                  value={form.refine_fallback_model}
+                  onValueChange={(v) => setForm({ ...form, refine_fallback_model: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {MODEL_OPTIONS.map((o) => (
+                      <SelectItem key={`fb-${o.value}`} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Используется автоматически, если основная модель недоступна или закончились кредиты.
+                </p>
+              </div>
+
+              <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3 sm:col-span-3">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 accent-primary"
+                  checked={form.refine_research}
+                  onChange={(e) => setForm({ ...form, refine_research: e.target.checked })}
+                />
+                <span className="text-sm">
+                  <span className="font-medium">Режим исследования конкурентов</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    Перед генерацией AI анализирует нишу и ближайших конкурентов и собирает макет
+                    страницы, который должен быть сильнее оригинала. Добавляет ~30–60 секунд.
+                  </span>
+                </span>
+              </label>
+
               <div className="space-y-2">
                 <Label htmlFor="temp">Температура</Label>
                 <Input
