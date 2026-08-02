@@ -152,6 +152,7 @@ function AppPage() {
     if (settingsQuery.data) {
       setRefineModel(settingsQuery.data.refine_model);
       setRefineTemp(settingsQuery.data.refine_temperature);
+      setRefineResearch(settingsQuery.data.refine_research);
     }
   }, [settingsQuery.data, refineTarget]);
 
@@ -180,7 +181,9 @@ function AppPage() {
     setRefineBrief(p.brief);
     setRefineModel(p.model);
     setRefineTemp(p.temperature);
+    if (typeof (p as any).research === "boolean") setRefineResearch((p as any).research);
   }
+
 
   const mcpQuery = useQuery({
     queryKey: ["mcp_servers"],
