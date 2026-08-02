@@ -19,6 +19,8 @@ import {
   type ToolCallEntry,
 } from "@/lib/mcp.functions";
 import { AI_PRESETS, getPreset } from "@/lib/ai-presets";
+import { AI_MODELS, getModelInfo } from "@/lib/ai-models";
+
 import { McpToolTimeline } from "@/components/mcp-tool-timeline";
 import { getUserSettings, type UserSettings } from "@/lib/settings.functions";
 import { Button } from "@/components/ui/button";
