@@ -409,7 +409,10 @@ export const refineClone = createServerFn({ method: "POST" })
     const model = data.model?.trim() || settings.refine_model || DEFAULT_REFINE_MODEL;
     const temperature =
       typeof data.temperature === "number" ? data.temperature : settings.refine_temperature;
+    const doResearch =
+      typeof data.research === "boolean" ? data.research : settings.refine_research;
     const budget = Math.max(20_000, Math.min(150_000, settings.refine_budget));
+
 
     const { data: row, error } = await supabase
       .from("clone_jobs")
