@@ -10,6 +10,8 @@ import {
   type UserSettings,
 } from "@/lib/settings.functions";
 import { activateOmniroute } from "@/lib/mcp.functions";
+import { AI_MODELS, getModelInfo } from "@/lib/ai-models";
+
 import { Logo } from "@/components/logo";
 import { McpServersCard } from "@/components/mcp-servers-card";
 import { Button } from "@/components/ui/button";
