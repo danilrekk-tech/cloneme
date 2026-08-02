@@ -211,8 +211,13 @@ export type Database = {
           default_mode: string
           default_styling: string
           omniroute_api_key: string | null
+          omniroute_base_url: string | null
+          omniroute_model: string | null
           refine_budget: number
+          refine_fallback_model: string
           refine_model: string
+          refine_provider: string
+          refine_research: boolean
           refine_temperature: number
           updated_at: string
           user_id: string
@@ -223,8 +228,13 @@ export type Database = {
           default_mode?: string
           default_styling?: string
           omniroute_api_key?: string | null
+          omniroute_base_url?: string | null
+          omniroute_model?: string | null
           refine_budget?: number
+          refine_fallback_model?: string
           refine_model?: string
+          refine_provider?: string
+          refine_research?: boolean
           refine_temperature?: number
           updated_at?: string
           user_id: string
@@ -235,8 +245,13 @@ export type Database = {
           default_mode?: string
           default_styling?: string
           omniroute_api_key?: string | null
+          omniroute_base_url?: string | null
+          omniroute_model?: string | null
           refine_budget?: number
+          refine_fallback_model?: string
           refine_model?: string
+          refine_provider?: string
+          refine_research?: boolean
           refine_temperature?: number
           updated_at?: string
           user_id?: string
