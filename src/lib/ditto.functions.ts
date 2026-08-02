@@ -381,6 +381,8 @@ const refineSchema = z.object({
   brief: z.string().max(4000).optional(),
   model: z.string().min(1).max(120).optional(),
   temperature: z.number().min(0).max(2).optional(),
+  research: z.boolean().optional(),
+
   selectedTools: z
     .array(
       z.object({
