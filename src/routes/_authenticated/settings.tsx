@@ -437,10 +437,16 @@ function SettingsPage() {
                 default_mode: form.default_mode,
                 default_framework: form.default_framework,
                 default_styling: form.default_styling,
+                refine_provider: form.refine_provider,
                 refine_model: form.refine_model,
+                refine_fallback_model: form.refine_fallback_model,
+                refine_research: form.refine_research,
                 refine_temperature: form.refine_temperature,
                 refine_budget: form.refine_budget,
+                omniroute_base_url: form.omniroute_base_url,
+                omniroute_model: form.omniroute_model,
               })
+
             }
             disabled={saveMut.isPending}
           >
