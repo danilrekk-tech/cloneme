@@ -238,6 +238,8 @@ function AppPage() {
       brief?: string;
       model: string;
       temperature: number;
+      research?: boolean;
+
       selectedTools: Array<{ serverId: string; toolName: string }>;
     }) => refineFn({ data: input }),
     onSuccess: () => {
