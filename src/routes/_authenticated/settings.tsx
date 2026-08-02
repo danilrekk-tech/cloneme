@@ -47,13 +47,12 @@ export const Route = createFileRoute("/_authenticated/settings")({
   component: SettingsPage,
 });
 
-const MODEL_OPTIONS: Array<{ value: string; label: string; hint: string }> = [
-  { value: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro", hint: "макс. качество · ~90–150с" },
-  { value: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash", hint: "быстрый · ~30–60с" },
-  { value: "google/gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite", hint: "экономичный" },
-  { value: "openai/gpt-5", label: "GPT-5", hint: "рассуждающий" },
-  { value: "openai/gpt-5-mini", label: "GPT-5 Mini", hint: "быстрый OpenAI" },
-];
+const MODEL_OPTIONS: Array<{ value: string; label: string; hint: string }> = AI_MODELS.map((m) => ({
+  value: m.id,
+  label: m.label,
+  hint: m.hint,
+}));
+
 
 function SettingsPage() {
   const navigate = useNavigate();
