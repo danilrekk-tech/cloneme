@@ -772,6 +772,44 @@ function safeStringify(v: any): string {
   }
 }
 
+/** Собирает абсолютные URL изображений из клона, чтобы AI-версия была с настоящими картинками. */
+function collectImageUrls(files: Record<string, any>, sourceUrl: string): string[] {
+  const out = new Set<string>();
+  let origin = "";
+  try {
+    origin = new URL(sourceUrl).origin;
+  } catch {
+    /* ignore */
+  }
+  const abs = (u: string) => {
+    if (/^https?:\/\//i.test(u)) return u;
+    if (u.startsWith("//")) return `https:${u}`;
+    if (u.startsWith("/") && origin) return `${origin}${u}`;
+    return null;
+  };
+  const IMG = /\.(png|jpe?g|webp|avif|svg|gif)(\?[^"')\s]*)?$/i;
+
+  for (const [path, v] of Object.entries(files)) {
+    if (IMG.test(path)) {
+      const a = abs(path.startsWith("/") ? path : `/${path}`);
+      if (a) out.add(a);
+    }
+    const content = typeof v?.content === "string" ? v.content : "";
+    if (!content) continue;
+    const matches = content.match(/["'(]([^"'()\s]+\.(?:png|jpe?g|webp|avif|svg|gif)(?:\?[^"'()\s]*)?)["')]/gi);
+    if (!matches) continue;
+    for (const m of matches) {
+      const raw = m.slice(1, -1);
+      const a = abs(raw);
+      if (a && !/data:|sprite|favicon|1x1|pixel/i.test(a)) out.add(a);
+      if (out.size > 60) break;
+    }
+    if (out.size > 60) break;
+  }
+  return [...out];
+}
+
+
 
 // Set which refinement version is "active" (rollback).
 export const activateRefinement = createServerFn({ method: "POST" })
