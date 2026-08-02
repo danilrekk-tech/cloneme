@@ -596,11 +596,36 @@ function AppPage() {
                   min={0}
                   max={2}
                   step={0.1}
+                  disabled={getModelInfo(refineModel)?.supportsTemperature === false}
                   value={refineTemp}
                   onChange={(e) => setRefineTemp(Number(e.target.value) || 0)}
                 />
               </div>
             </div>
+
+            {getModelInfo(refineModel)?.supportsTemperature === false ? (
+              <p className="text-xs text-amber-500">
+                Эта модель работает только со значением температуры по умолчанию — параметр будет
+                пропущен автоматически.
+              </p>
+            ) : null}
+
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 accent-primary"
+                checked={refineResearch}
+                onChange={(e) => setRefineResearch(e.target.checked)}
+              />
+              <span className="text-sm">
+                <span className="font-medium">Исследовать конкурентов перед генерацией</span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  AI изучит нишу и ближайших конкурентов, соберёт макет сильнее оригинала и только
+                  потом сгенерирует страницу. Дольше, но результат заметно лучше.
+                </span>
+              </span>
+            </label>
+
 
             <div className="space-y-2">
               <Label htmlFor="brief">Бриф (необязательно)</Label>
