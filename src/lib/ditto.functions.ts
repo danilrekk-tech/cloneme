@@ -547,6 +547,11 @@ export const refineClone = createServerFn({ method: "POST" })
       }
 
       const fileList = Object.keys(files).slice(0, 160).join("\n");
+      const imageUrls = collectImageUrls(files, row.source_url).slice(0, 24);
+      const imageBlock =
+        imageUrls.length > 0
+          ? `\nРеальные изображения из клона (используй их в вёрстке, абсолютные URL):\n${imageUrls.join("\n")}\n`
+          : "";
 
       const toolResultsBlock =
         toolCalls.length > 0
@@ -562,89 +567,132 @@ export const refineClone = createServerFn({ method: "POST" })
               .join("\n\n")}\n`
           : "";
 
-      const systemPrompt = `Ты — старший продуктовый дизайнер и фронтенд-инженер, работающий по ритуалу /skill:redesign и /skill:design-taste-frontend-v1.
+      const providerCfg = {
+        provider: settings.refine_provider,
+        lovableKey,
+        omniBaseUrl: settings.omniroute_base_url,
+        omniKey: settings.omniroute_api_key,
+      } as const;
 
-Твой вкус:
-• Анти-slop. Никаких дефолтных фиолетовых/индиго градиентов, никакого Inter в display, никаких centered hero + 3 симметричных карточек, никаких "Elevate/Seamless/Unleash", никаких Jane Doe и 99.99%.
-• Типографика: display — Space Grotesk / Cabinet Grotesk / Satoshi / Geist, tracking-tight, leading-none для крупных заголовков. Body — Inter/DM Sans, max-w-[65ch], leading-relaxed.
-• Палитра: макс. 1 акцент, насыщенность <80%. Off-black (не #000). Zinc/slate базы. Тонированные тени, не неоновый glow.
-• Композиция: асимметрия по умолчанию — split-screen, offset grids, bento. Никогда generic 3-column feature row. Мобильная версия — строго single-column с px-4 py-8. Full-height секции = min-h-[100dvh].
-• Материал: карточки только если elevation несёт смысл. rounded-[1.5rem]+, тонкий border, лёгкий diffusion shadow.
-• Микро-интеракции: :hover translate-y[-1px], :active scale-[0.98].
-• Контент: реальные, конкретные имена/цифры/копии. Если сохраняешь бренд клона — сохраняй его позиционирование, полируй.
-• Иконки — inline SVG в стиле Phosphor, strokeWidth 1.5.
-• Работай ТОЛЬКО в чистом HTML + Tailwind CDN + Google Fonts <link>. Разрешён небольшой vanilla JS <script> для навигации/аккордеонов/mobile-menu.
-• Минимум: sticky/floating nav с mobile-меню, hero, 3–5 контентных секций с разной композицией, футер. Mobile-first.
-
-Формат: Верни СТРОГО валидный JSON, БЕЗ markdown-ограждений, БЕЗ комментариев:
+      // --------- Pass 1: исследование конкурентов + макет ---------
+      let blueprint = "";
+      if (doResearch) {
+        try {
+          const researchModel =
+            settings.refine_provider === "omniroute"
+              ? model
+              : "google/gemini-3.6-flash";
+          const res = await callChat(providerCfg, {
+            model: researchModel,
+            fallbackModel: settings.refine_fallback_model,
+            temperature: 0.4,
+            json: true,
+            timeoutMs: 70_000,
+            messages: [
+              {
+                role: "system",
+                content: `Ты — продуктовый стратег и арт-директор. Проанализируй сайт и его нишу.
+Верни СТРОГО JSON без markdown:
 {
-  "audit": "5-8 буллетов, конкретно что было слабо и почему",
-  "changes": "5-8 буллетов, что именно ты изменил и как это улучшает продукт",
-  "previewHtml": "<!doctype html>...полностью самодостаточный документ..."
-}
+  "niche": "ниша и целевая аудитория, 1-2 предложения",
+  "competitors": ["3-5 реальных ближайших конкурентов с коротким описанием их сильного приёма"],
+  "gaps": ["3-5 слабых мест исходной страницы относительно конкурентов"],
+  "positioning": "как позиционировать страницу, чтобы обойти конкурентов",
+  "blueprint": ["последовательность секций будущей страницы: название секции — что в ней и зачем, 6-9 пунктов"],
+  "artDirection": "палитра (конкретные hex), шрифтовая пара, тип композиции, характер анимаций"
+}`,
+              },
+              {
+                role: "user",
+                content: `URL: ${row.source_url}
+Задача пользователя: ${brief || "(не указана)"}
+Файлы клона (пути):
+${fileList.slice(0, 4000)}
 
-previewHtml обязан:
-1. Начинаться с <!doctype html>, содержать <html lang>, <head> с <meta viewport>, <title>, шрифтами и Tailwind CDN.
-2. Быть адаптивным (mobile-first), с рабочим mobile-меню.
-3. Иметь минимум 4 полноценные секции + hero + футер.
-4. Не содержать placeholder-текстов.`;
+Фрагменты исходников:
+${excerpts.join("\n").slice(0, 30_000)}`,
+              },
+            ],
+          });
+          const parsedResearch = parseJsonLoose<any>(res.text);
+          if (parsedResearch) {
+            blueprint = `\nИССЛЕДОВАНИЕ РЫНКА И МАКЕТ (обязателен к исполнению):
+Ниша: ${parsedResearch.niche ?? "-"}
+Конкуренты: ${(parsedResearch.competitors ?? []).join(" | ")}
+Слабые места оригинала: ${(parsedResearch.gaps ?? []).join(" | ")}
+Позиционирование: ${parsedResearch.positioning ?? "-"}
+Структура секций: ${(parsedResearch.blueprint ?? []).join(" → ")}
+Арт-дирекшн: ${parsedResearch.artDirection ?? "-"}\n`;
+          }
+        } catch {
+          // исследование необязательно — продолжаем без него
+        }
+      }
+
+      const systemPrompt = `Ты — старший продуктовый дизайнер и фронтенд-инженер, работающий по ритуалу /skill:redesign и /skill:design-taste-frontend-v1.
+Твоя задача — не схематичный вайрфрейм, а ПОЛНОЦЕННЫЙ ПРОДАКШН-САЙТ: реальные тексты, реальные изображения, анимации, состояния, адаптив.
+
+Вкус:
+• Анти-slop. Никаких дефолтных фиолетовых/индиго градиентов на белом, никакого Inter в display, никаких centered hero + 3 симметричных карточек, никаких «Elevate/Seamless/Unleash», никаких Jane Doe и 99.99%.
+• Типографика: display — Space Grotesk / Sora / Syne / Instrument Serif, tracking-tight, leading-none у крупных заголовков. Body — DM Sans / Manrope, max-w-[65ch].
+• Палитра: максимум один акцент, насыщенность <80%, off-black вместо #000, тонированные тени.
+• Композиция: асимметрия — split-screen, offset grid, bento. Разная композиция в каждой секции.
+• Материал: rounded-[1.5rem]+, тонкий border, мягкая диффузная тень.
+
+Обязательные технические требования к previewHtml:
+1. <!doctype html>, <html lang>, <head> с <meta viewport>, осмысленным <title>, meta description, Google Fonts <link> и Tailwind CDN (https://cdn.tailwindcss.com) + инлайн tailwind.config с кастомными шрифтами/цветами.
+2. Реальные ИЗОБРАЖЕНИЯ: используй абсолютные URL ассетов клона (список дан ниже). Если их не хватает — тематические фото с images.unsplash.com (формат https://images.unsplash.com/photo-…?auto=format&fit=crop&w=1400&q=80) и inline SVG-паттерны. Никаких серых прямоугольников-заглушек и placeholder.com.
+3. АНИМАЦИИ: @keyframes + scroll-reveal через IntersectionObserver (класс .reveal → .is-visible), staggered задержки, hover translate-y[-2px], active scale-[0.98], плавный parallax или градиентный сдвиг в hero, marquee логотипов. Обязателен блок @media (prefers-reduced-motion: reduce) — отключение анимаций.
+4. СТРУКТУРА: sticky/floating nav с рабочим mobile-меню (vanilla JS), hero на min-h-[92dvh], минимум 6 содержательных секций разной композиции (например: доказательства/логотипы, ценность, продукт/фичи в bento, процесс, цифры, кейсы/отзывы, FAQ-аккордеон, финальный CTA), развёрнутый футер с колонками.
+5. Реальный контент из клона: сохраняй бренд, названия, цифры и смысл, но переписывай формулировки сильнее. Никаких «Lorem ipsum» и абстрактных заглушек.
+6. Интерактив на vanilla JS: mobile-меню, аккордеон FAQ, табы или счётчики — работающие, без ошибок в консоли.
+7. Полностью самодостаточный один файл, mobile-first, доступность: alt-тексты, aria-label, видимый focus-ring, контраст ≥ 4.5:1.
+
+Объём: это большая страница. Не сокращай разметку ради краткости — выдавай HTML целиком.
+
+Формат ответа: СТРОГО валидный JSON, БЕЗ markdown-ограждений и комментариев:
+{
+  "audit": "5-8 буллетов: что было слабо и почему",
+  "changes": "5-8 буллетов: что изменено и как это улучшает продукт",
+  "previewHtml": "<!doctype html>…полный самодостаточный документ…"
+}`;
 
       const userPrompt = `Исходный URL клона: ${row.source_url}
 Задача пользователя: ${brief || "(не указана — проведи собственный аудит и предложи глубокую переработку)"}
 Всего файлов в клоне: ${Object.keys(files).length}
-Модель: ${model}
-${mcp.summary ? `\n${mcp.summary}\n` : ""}${toolResultsBlock}
+${blueprint}${mcp.summary ? `\n${mcp.summary}\n` : ""}${toolResultsBlock}${imageBlock}
 Пути (обрезано):
 ${fileList}
 
 Ключевые исходники клона:
 ${excerpts.join("\n")}
 
-Сделай detailed refinement по /skill:redesign + /skill:design-taste-frontend-v1. previewHtml — полностью рабочий одиночный документ.`;
+Сделай detailed refinement по /skill:redesign + /skill:design-taste-frontend-v1: полноценный сайт с изображениями, анимациями и рабочим интерактивом, объективно сильнее оригинала.`;
 
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 165_000);
-      let aiRes: Response;
-      try {
-        aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${lovableKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model,
-            temperature,
-            messages: [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: userPrompt },
-            ],
-            response_format: { type: "json_object" },
-          }),
-          signal: ctrl.signal,
-        });
-      } finally {
-        clearTimeout(timer);
-      }
+      const chat = await callChat(providerCfg, {
+        model,
+        fallbackModel: settings.refine_fallback_model,
+        temperature,
+        json: true,
+        timeoutMs: 175_000,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+      });
 
-      if (!aiRes.ok) {
-        const t = await aiRes.text();
-        throw new Error(`AI ${aiRes.status}: ${t.slice(0, 400)}`);
-      }
+      const parsed = parseJsonLoose<{
+        audit?: string;
+        changes?: string;
+        previewHtml?: string;
+      }>(chat.text) ?? {};
 
-      const aiJson: any = await aiRes.json();
-      const raw: string = aiJson?.choices?.[0]?.message?.content ?? "";
-      let parsed: { audit?: string; changes?: string; previewHtml?: string } = {};
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        const m = raw.match(/\{[\s\S]*\}/);
-        if (m) {
-          try {
-            parsed = JSON.parse(m[0]);
-          } catch {}
-        }
-      }
       if (!parsed?.previewHtml || parsed.previewHtml.length < 200) {
         throw new Error("AI не вернул валидный HTML-препросмотр");
       }
+      const usedModel = chat.model;
+      const modelNotes = chat.notes;
+
 
       const previewPath = `${userId}/${row.id}/refined/v${nextVersion}.html`;
       const { error: upErr } = await supabase.storage
