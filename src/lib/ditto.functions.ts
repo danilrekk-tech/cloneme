@@ -3,6 +3,8 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { getActiveMcpContext, callMcpTool, loadServersWithTools } from "./mcp.functions";
 import { loadEffectiveSettings } from "./settings.functions";
+import { callChat, parseJsonLoose } from "./ai-chat.server";
+
 
 const DITTO_BASE = "https://api.ditto.site/v1";
 const BUCKET = "clone-artifacts";
