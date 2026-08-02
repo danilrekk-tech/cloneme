@@ -714,11 +714,13 @@ ${excerpts.join("\n")}
         .from("clone_refinements")
         .update({
           audit: parsed.audit ?? "",
-          changes: parsed.changes ?? "",
+          changes: [parsed.changes ?? "", ...(modelNotes.length ? [`\n\nПримечания движка: ${modelNotes.join(" ")}`] : [])].join(""),
           preview_path: previewPath,
           status: "ready",
           error: null,
+          model: usedModel,
           tool_calls: toolCalls,
+          settings: { model: usedModel, requestedModel: model, temperature, budget, research: doResearch },
         })
         .eq("id", refRow.id);
 
@@ -733,7 +735,8 @@ ${excerpts.join("\n")}
         })
         .eq("id", row.id);
 
-      return { versionId: refRow.id, version: nextVersion, toolCalls };
+      return { versionId: refRow.id, version: nextVersion, toolCalls, model: usedModel, notes: modelNotes };
+
     } catch (e: any) {
       const msg =
         e?.name === "AbortError"
