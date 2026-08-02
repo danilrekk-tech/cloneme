@@ -141,6 +141,8 @@ function AppPage() {
   const [refineBrief, setRefineBrief] = useState("");
   const [refineModel, setRefineModel] = useState<string>("google/gemini-2.5-pro");
   const [refineTemp, setRefineTemp] = useState<number>(0.6);
+  const [refineResearch, setRefineResearch] = useState<boolean>(false);
+
   const [selectedTools, setSelectedTools] = useState<Record<string, boolean>>({});
   const [presetId, setPresetId] = useState<string>("none");
   const [toolCalls, setToolCalls] = useState<ToolCallEntry[]>([]);
