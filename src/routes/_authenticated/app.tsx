@@ -764,6 +764,8 @@ function AppPage() {
                   brief: refineBrief.trim() || undefined,
                   model: refineModel,
                   temperature: refineTemp,
+                  research: refineResearch,
+
                   selectedTools: picks,
                 });
               }}
