@@ -14,12 +14,23 @@ import { modelSupportsTemperature, FALLBACK_CHAIN } from "./ai-models";
 
 export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
+export type SecondaryProvider = {
+  /** Человеческое название для сообщений в UI. */
+  label: string;
+  baseUrl: string;
+  key?: string | null;
+  model?: string | null;
+};
+
 export type ChatProviderConfig = {
   provider: "lovable" | "omniroute";
   lovableKey?: string;
   omniBaseUrl?: string | null;
   omniKey?: string | null;
+  /** Провайдеры, на которые переключаемся, когда основной недоступен (например, кончились токены Lovable). */
+  fallbacks?: SecondaryProvider[];
 };
+
 
 export type ChatOptions = {
   model: string;
