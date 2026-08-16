@@ -237,3 +237,88 @@ export function parseJsonLoose<T = any>(raw: string): T | null {
   }
   return null;
 }
+
+/** Модели генерации изображений в порядке предпочтения (Lovable AI Gateway). */
+export const IMAGE_MODELS = [
+  "google/gemini-3-pro-image-preview",
+  "google/gemini-3.1-flash-image",
+  "google/gemini-2.5-flash-image",
+];
+
+export type ImageResult = { base64: string; mime: string; model: string; notes: string[] };
+
+/**
+ * Генерирует изображение через чат-совместимый endpoint (modalities: image).
+ * Если основной провайдер вернул 402/429/5xx — пробуем следующую модель,
+ * затем резервных провайдеров из cfg.fallbacks.
+ */
+export async function generateImage(
+  cfg: ChatProviderConfig,
+  opts: { prompt: string; model?: string | null; timeoutMs?: number },
+): Promise<ImageResult> {
+  const notes: string[] = [];
+  const primary = endpointFor(cfg);
+  const primaryLabel = cfg.provider === "omniroute" ? "Omniroute" : "Lovable AI";
+
+  const attempts: Array<{ endpoint: Endpoint; model: string; label: string }> = [];
+  const models: string[] = [];
+  const push = (m?: string | null) => {
+    if (m && !models.includes(m)) models.push(m);
+  };
+  push(opts.model);
+  IMAGE_MODELS.forEach(push);
+  for (const m of models) attempts.push({ endpoint: primary, model: m, label: primaryLabel });
+  for (const fb of cfg.fallbacks ?? []) {
+    if (!fb.baseUrl) continue;
+    attempts.push({
+      endpoint: endpointForSecondary(fb),
+      model: fb.model || IMAGE_MODELS[1],
+      label: fb.label,
+    });
+  }
+
+  let lastError = "";
+  for (let i = 0; i < attempts.length; i++) {
+    const { endpoint, model, label } = attempts[i];
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 150_000);
+    try {
+      const res = await fetch(endpoint.url, {
+        method: "POST",
+        headers: endpoint.headers,
+        signal: ctrl.signal,
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: opts.prompt }],
+          modalities: ["image", "text"],
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.text()).slice(0, 400);
+        lastError = `${res.status}: ${body}`;
+        if (isRetryableStatus(res.status) && i < attempts.length - 1) {
+          notes.push(`${label} · ${model} недоступна (${res.status}) — пробуем следующую.`);
+        }
+        continue;
+      }
+      const json: any = await res.json();
+      const url: string | undefined = json?.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+      if (!url || !url.startsWith("data:")) {
+        lastError = "Модель не вернула изображение";
+        continue;
+      }
+      const [head, b64] = url.split(",", 2);
+      const mime = /data:([^;]+)/.exec(head)?.[1] ?? "image/png";
+      return { base64: b64, mime, model, notes };
+    } catch (e: any) {
+      if (e?.name === "AbortError") {
+        lastError = "Таймаут генерации изображения";
+      } else {
+        lastError = String(e?.message ?? e).slice(0, 300);
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw new Error(`Генерация изображения: ${lastError || "не удалось"}`);
+}
