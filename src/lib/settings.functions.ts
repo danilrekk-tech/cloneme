@@ -15,6 +15,10 @@ export type UserSettings = {
   refine_research: boolean;
   refine_temperature: number;
   refine_budget: number;
+  fallback_provider: "none" | "openrouter" | "omniroute";
+  openrouter_api_key: string | null;
+  openrouter_model: string | null;
+  concept_model: string;
 };
 
 const DEFAULTS: UserSettings = {
@@ -30,6 +34,10 @@ const DEFAULTS: UserSettings = {
   refine_research: true,
   refine_temperature: 0.6,
   refine_budget: 60000,
+  fallback_provider: "none",
+  openrouter_api_key: null,
+  openrouter_model: null,
+  concept_model: "google/gemini-3.1-flash-image",
 };
 
 function toSettings(data: any): UserSettings {
@@ -47,6 +55,10 @@ function toSettings(data: any): UserSettings {
     refine_research: data.refine_research ?? DEFAULTS.refine_research,
     refine_temperature: Number(data.refine_temperature ?? DEFAULTS.refine_temperature),
     refine_budget: data.refine_budget ?? DEFAULTS.refine_budget,
+    fallback_provider: (data.fallback_provider ?? DEFAULTS.fallback_provider) as UserSettings["fallback_provider"],
+    openrouter_api_key: data.openrouter_api_key ?? null,
+    openrouter_model: data.openrouter_model ?? null,
+    concept_model: data.concept_model ?? DEFAULTS.concept_model,
   };
 }
 
@@ -75,6 +87,10 @@ const saveSchema = z.object({
   refine_research: z.boolean().optional(),
   refine_temperature: z.number().min(0).max(2).optional(),
   refine_budget: z.number().int().min(10000).max(200000).optional(),
+  fallback_provider: z.enum(["none", "openrouter", "omniroute"]).optional(),
+  openrouter_api_key: z.string().max(4000).nullable().optional(),
+  openrouter_model: z.string().max(200).nullable().optional(),
+  concept_model: z.string().min(1).max(200).optional(),
 });
 
 export const saveUserSettings = createServerFn({ method: "POST" })
@@ -83,7 +99,7 @@ export const saveUserSettings = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     const payload: any = { user_id: userId, ...data };
-    for (const k of ["omniroute_api_key", "omniroute_base_url", "omniroute_model"]) {
+    for (const k of ["omniroute_api_key", "omniroute_base_url", "omniroute_model", "openrouter_api_key", "openrouter_model"]) {
       if (payload[k] !== undefined) {
         payload[k] = typeof payload[k] === "string" ? payload[k].trim() || null : null;
       }
@@ -106,4 +122,26 @@ export async function loadEffectiveSettings(
     .eq("user_id", userId)
     .maybeSingle();
   return toSettings(data);
+}
+
+/** Собирает список резервных провайдеров, когда у Lovable AI кончились токены. */
+export function secondaryProviders(s: UserSettings) {
+  const out: Array<{ label: string; baseUrl: string; key?: string | null; model?: string | null }> = [];
+  if (s.fallback_provider === "openrouter" && s.openrouter_api_key) {
+    out.push({
+      label: "OpenRouter",
+      baseUrl: "https://openrouter.ai/api/v1",
+      key: s.openrouter_api_key,
+      model: s.openrouter_model || "google/gemini-2.0-flash-exp:free",
+    });
+  }
+  if (s.fallback_provider === "omniroute" && s.omniroute_base_url) {
+    out.push({
+      label: "Omniroute",
+      baseUrl: s.omniroute_base_url,
+      key: s.omniroute_api_key,
+      model: s.omniroute_model,
+    });
+  }
+  return out;
 }

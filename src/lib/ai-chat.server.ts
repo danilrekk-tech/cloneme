@@ -14,12 +14,23 @@ import { modelSupportsTemperature, FALLBACK_CHAIN } from "./ai-models";
 
 export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
+export type SecondaryProvider = {
+  /** Человеческое название для сообщений в UI. */
+  label: string;
+  baseUrl: string;
+  key?: string | null;
+  model?: string | null;
+};
+
 export type ChatProviderConfig = {
   provider: "lovable" | "omniroute";
   lovableKey?: string;
   omniBaseUrl?: string | null;
   omniKey?: string | null;
+  /** Провайдеры, на которые переключаемся, когда основной недоступен (например, кончились токены Lovable). */
+  fallbacks?: SecondaryProvider[];
 };
+
 
 export type ChatOptions = {
   model: string;
@@ -70,13 +81,26 @@ function endpointFor(cfg: ChatProviderConfig): { url: string; headers: Record<st
   };
 }
 
+type Endpoint = { url: string; headers: Record<string, string> };
+
+function endpointForSecondary(p: SecondaryProvider): Endpoint {
+  return {
+    url: normalizeBase(p.baseUrl),
+    headers: {
+      "Content-Type": "application/json",
+      ...(p.key ? { Authorization: `Bearer ${p.key}` } : {}),
+    },
+  };
+}
+
 async function rawCall(
-  cfg: ChatProviderConfig,
+  endpoint: Endpoint,
   model: string,
   opts: ChatOptions,
   withTemperature: boolean,
 ): Promise<{ ok: true; text: string } | { ok: false; status: number; body: string }> {
-  const { url, headers } = endpointFor(cfg);
+  const { url, headers } = endpoint;
+
   const body: Record<string, unknown> = {
     model,
     messages: opts.messages,
@@ -120,29 +144,45 @@ function isRetryableStatus(status: number): boolean {
   return status === 402 || status === 429 || status >= 500;
 }
 
-/** Вызов модели с авто-фиксом temperature и цепочкой резервных моделей. */
+/** Вызов модели с авто-фиксом temperature, цепочкой моделей и резервными провайдерами. */
 export async function callChat(cfg: ChatProviderConfig, opts: ChatOptions): Promise<ChatResult> {
   const notes: string[] = [];
-  const candidates: string[] = [];
+
+  type Attempt = { endpoint: Endpoint; model: string; label: string };
+  const attempts: Attempt[] = [];
+  const primary = endpointFor(cfg);
+  const primaryLabel = cfg.provider === "omniroute" ? "Omniroute" : "Lovable AI";
+
+  const models: string[] = [];
   const push = (m?: string | null) => {
-    if (m && !candidates.includes(m)) candidates.push(m);
+    if (m && !models.includes(m)) models.push(m);
   };
   push(opts.model);
   push(opts.fallbackModel);
-  // Резервные бесплатные/дешёвые модели — только для Lovable AI.
+  // Резервные дешёвые модели — только для Lovable AI.
   if (cfg.provider === "lovable") FALLBACK_CHAIN.forEach(push);
+  for (const m of models) attempts.push({ endpoint: primary, model: m, label: primaryLabel });
+
+  // Резервные провайдеры (например, OpenRouter), когда у основного кончились токены.
+  for (const fb of cfg.fallbacks ?? []) {
+    if (!fb.baseUrl) continue;
+    attempts.push({
+      endpoint: endpointForSecondary(fb),
+      model: fb.model || opts.model,
+      label: fb.label,
+    });
+  }
 
   let lastError = "";
 
-  for (let i = 0; i < candidates.length; i++) {
-    const model = candidates[i];
-    // Для незнакомых Omniroute-моделей temperature отправляем, для GPT-5 — нет.
+  for (let i = 0; i < attempts.length; i++) {
+    const { endpoint, model, label } = attempts[i];
     let withTemp = modelSupportsTemperature(model) && typeof opts.temperature === "number";
 
     for (let attempt = 0; attempt < 2; attempt++) {
       let out;
       try {
-        out = await rawCall(cfg, model, opts, withTemp);
+        out = await rawCall(endpoint, model, opts, withTemp);
       } catch (e: any) {
         if (e?.name === "AbortError") throw e;
         lastError = String(e?.message ?? e).slice(0, 300);
@@ -162,18 +202,20 @@ export async function callChat(cfg: ChatProviderConfig, opts: ChatOptions): Prom
         withTemp = false;
         continue; // повтор без temperature
       }
-      if (isRetryableStatus(out.status) && i < candidates.length - 1) {
+      if (isRetryableStatus(out.status) && i < attempts.length - 1) {
+        const next = attempts[i + 1];
         notes.push(
           out.status === 402
-            ? `У модели ${model} закончились кредиты — переключаемся на резервную.`
-            : `Модель ${model} недоступна (${out.status}) — переключаемся на резервную.`,
+            ? `У ${label} (${model}) закончились кредиты — переключаемся на ${next.label} · ${next.model}.`
+            : `${label} · ${model} недоступна (${out.status}) — переключаемся на ${next.label} · ${next.model}.`,
         );
       }
-      break; // пробуем следующую модель
+      break; // пробуем следующую комбинацию
     }
   }
 
   throw new Error(`AI ${lastError || "не ответил"}`);
+
 }
 
 /** Достаёт JSON-объект из ответа модели (устойчиво к markdown-ограждениям). */
@@ -194,4 +236,89 @@ export function parseJsonLoose<T = any>(raw: string): T | null {
     }
   }
   return null;
+}
+
+/** Модели генерации изображений в порядке предпочтения (Lovable AI Gateway). */
+export const IMAGE_MODELS = [
+  "google/gemini-3-pro-image-preview",
+  "google/gemini-3.1-flash-image",
+  "google/gemini-2.5-flash-image",
+];
+
+export type ImageResult = { base64: string; mime: string; model: string; notes: string[] };
+
+/**
+ * Генерирует изображение через чат-совместимый endpoint (modalities: image).
+ * Если основной провайдер вернул 402/429/5xx — пробуем следующую модель,
+ * затем резервных провайдеров из cfg.fallbacks.
+ */
+export async function generateImage(
+  cfg: ChatProviderConfig,
+  opts: { prompt: string; model?: string | null; timeoutMs?: number },
+): Promise<ImageResult> {
+  const notes: string[] = [];
+  const primary = endpointFor(cfg);
+  const primaryLabel = cfg.provider === "omniroute" ? "Omniroute" : "Lovable AI";
+
+  const attempts: Array<{ endpoint: Endpoint; model: string; label: string }> = [];
+  const models: string[] = [];
+  const push = (m?: string | null) => {
+    if (m && !models.includes(m)) models.push(m);
+  };
+  push(opts.model);
+  IMAGE_MODELS.forEach(push);
+  for (const m of models) attempts.push({ endpoint: primary, model: m, label: primaryLabel });
+  for (const fb of cfg.fallbacks ?? []) {
+    if (!fb.baseUrl) continue;
+    attempts.push({
+      endpoint: endpointForSecondary(fb),
+      model: fb.model || IMAGE_MODELS[1],
+      label: fb.label,
+    });
+  }
+
+  let lastError = "";
+  for (let i = 0; i < attempts.length; i++) {
+    const { endpoint, model, label } = attempts[i];
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 150_000);
+    try {
+      const res = await fetch(endpoint.url, {
+        method: "POST",
+        headers: endpoint.headers,
+        signal: ctrl.signal,
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: opts.prompt }],
+          modalities: ["image", "text"],
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.text()).slice(0, 400);
+        lastError = `${res.status}: ${body}`;
+        if (isRetryableStatus(res.status) && i < attempts.length - 1) {
+          notes.push(`${label} · ${model} недоступна (${res.status}) — пробуем следующую.`);
+        }
+        continue;
+      }
+      const json: any = await res.json();
+      const url: string | undefined = json?.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+      if (!url || !url.startsWith("data:")) {
+        lastError = "Модель не вернула изображение";
+        continue;
+      }
+      const [head, b64] = url.split(",", 2);
+      const mime = /data:([^;]+)/.exec(head)?.[1] ?? "image/png";
+      return { base64: b64, mime, model, notes };
+    } catch (e: any) {
+      if (e?.name === "AbortError") {
+        lastError = "Таймаут генерации изображения";
+      } else {
+        lastError = String(e?.message ?? e).slice(0, 300);
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw new Error(`Генерация изображения: ${lastError || "не удалось"}`);
 }

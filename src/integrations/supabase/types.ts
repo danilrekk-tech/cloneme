@@ -14,6 +14,65 @@ export type Database = {
   }
   public: {
     Tables: {
+      clone_concepts: {
+        Row: {
+          batch_id: string
+          brief: string | null
+          created_at: string
+          error: string | null
+          id: string
+          idx: number
+          image_path: string | null
+          job_id: string
+          model: string | null
+          spec: Json | null
+          status: string
+          summary: string
+          title: string
+          user_id: string
+        }
+        Insert: {
+          batch_id: string
+          brief?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          idx?: number
+          image_path?: string | null
+          job_id: string
+          model?: string | null
+          spec?: Json | null
+          status?: string
+          summary?: string
+          title?: string
+          user_id: string
+        }
+        Update: {
+          batch_id?: string
+          brief?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          idx?: number
+          image_path?: string | null
+          job_id?: string
+          model?: string | null
+          spec?: Json | null
+          status?: string
+          summary?: string
+          title?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clone_concepts_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "clone_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       clone_jobs: {
         Row: {
           active_refinement_id: string | null
@@ -96,6 +155,7 @@ export type Database = {
           audit: string | null
           brief: string | null
           changes: string | null
+          concept_id: string | null
           created_at: string
           error: string | null
           id: string
@@ -114,6 +174,7 @@ export type Database = {
           audit?: string | null
           brief?: string | null
           changes?: string | null
+          concept_id?: string | null
           created_at?: string
           error?: string | null
           id?: string
@@ -132,6 +193,7 @@ export type Database = {
           audit?: string | null
           brief?: string | null
           changes?: string | null
+          concept_id?: string | null
           created_at?: string
           error?: string | null
           id?: string
@@ -206,13 +268,17 @@ export type Database = {
       }
       user_settings: {
         Row: {
+          concept_model: string | null
           created_at: string
           default_framework: string
           default_mode: string
           default_styling: string
+          fallback_provider: string | null
           omniroute_api_key: string | null
           omniroute_base_url: string | null
           omniroute_model: string | null
+          openrouter_api_key: string | null
+          openrouter_model: string | null
           refine_budget: number
           refine_fallback_model: string
           refine_model: string
@@ -223,13 +289,17 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          concept_model?: string | null
           created_at?: string
           default_framework?: string
           default_mode?: string
           default_styling?: string
+          fallback_provider?: string | null
           omniroute_api_key?: string | null
           omniroute_base_url?: string | null
           omniroute_model?: string | null
+          openrouter_api_key?: string | null
+          openrouter_model?: string | null
           refine_budget?: number
           refine_fallback_model?: string
           refine_model?: string
@@ -240,13 +310,17 @@ export type Database = {
           user_id: string
         }
         Update: {
+          concept_model?: string | null
           created_at?: string
           default_framework?: string
           default_mode?: string
           default_styling?: string
+          fallback_provider?: string | null
           omniroute_api_key?: string | null
           omniroute_base_url?: string | null
           omniroute_model?: string | null
+          openrouter_api_key?: string | null
+          openrouter_model?: string | null
           refine_budget?: number
           refine_fallback_model?: string
           refine_model?: string
