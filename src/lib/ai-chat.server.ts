@@ -144,29 +144,45 @@ function isRetryableStatus(status: number): boolean {
   return status === 402 || status === 429 || status >= 500;
 }
 
-/** Вызов модели с авто-фиксом temperature и цепочкой резервных моделей. */
+/** Вызов модели с авто-фиксом temperature, цепочкой моделей и резервными провайдерами. */
 export async function callChat(cfg: ChatProviderConfig, opts: ChatOptions): Promise<ChatResult> {
   const notes: string[] = [];
-  const candidates: string[] = [];
+
+  type Attempt = { endpoint: Endpoint; model: string; label: string };
+  const attempts: Attempt[] = [];
+  const primary = endpointFor(cfg);
+  const primaryLabel = cfg.provider === "omniroute" ? "Omniroute" : "Lovable AI";
+
+  const models: string[] = [];
   const push = (m?: string | null) => {
-    if (m && !candidates.includes(m)) candidates.push(m);
+    if (m && !models.includes(m)) models.push(m);
   };
   push(opts.model);
   push(opts.fallbackModel);
-  // Резервные бесплатные/дешёвые модели — только для Lovable AI.
+  // Резервные дешёвые модели — только для Lovable AI.
   if (cfg.provider === "lovable") FALLBACK_CHAIN.forEach(push);
+  for (const m of models) attempts.push({ endpoint: primary, model: m, label: primaryLabel });
+
+  // Резервные провайдеры (например, OpenRouter), когда у основного кончились токены.
+  for (const fb of cfg.fallbacks ?? []) {
+    if (!fb.baseUrl) continue;
+    attempts.push({
+      endpoint: endpointForSecondary(fb),
+      model: fb.model || opts.model,
+      label: fb.label,
+    });
+  }
 
   let lastError = "";
 
-  for (let i = 0; i < candidates.length; i++) {
-    const model = candidates[i];
-    // Для незнакомых Omniroute-моделей temperature отправляем, для GPT-5 — нет.
+  for (let i = 0; i < attempts.length; i++) {
+    const { endpoint, model, label } = attempts[i];
     let withTemp = modelSupportsTemperature(model) && typeof opts.temperature === "number";
 
     for (let attempt = 0; attempt < 2; attempt++) {
       let out;
       try {
-        out = await rawCall(cfg, model, opts, withTemp);
+        out = await rawCall(endpoint, model, opts, withTemp);
       } catch (e: any) {
         if (e?.name === "AbortError") throw e;
         lastError = String(e?.message ?? e).slice(0, 300);
@@ -186,18 +202,20 @@ export async function callChat(cfg: ChatProviderConfig, opts: ChatOptions): Prom
         withTemp = false;
         continue; // повтор без temperature
       }
-      if (isRetryableStatus(out.status) && i < candidates.length - 1) {
+      if (isRetryableStatus(out.status) && i < attempts.length - 1) {
+        const next = attempts[i + 1];
         notes.push(
           out.status === 402
-            ? `У модели ${model} закончились кредиты — переключаемся на резервную.`
-            : `Модель ${model} недоступна (${out.status}) — переключаемся на резервную.`,
+            ? `У ${label} (${model}) закончились кредиты — переключаемся на ${next.label} · ${next.model}.`
+            : `${label} · ${model} недоступна (${out.status}) — переключаемся на ${next.label} · ${next.model}.`,
         );
       }
-      break; // пробуем следующую модель
+      break; // пробуем следующую комбинацию
     }
   }
 
   throw new Error(`AI ${lastError || "не ответил"}`);
+
 }
 
 /** Достаёт JSON-объект из ответа модели (устойчиво к markdown-ограждениям). */
