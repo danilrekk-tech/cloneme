@@ -81,13 +81,26 @@ function endpointFor(cfg: ChatProviderConfig): { url: string; headers: Record<st
   };
 }
 
+type Endpoint = { url: string; headers: Record<string, string> };
+
+function endpointForSecondary(p: SecondaryProvider): Endpoint {
+  return {
+    url: normalizeBase(p.baseUrl),
+    headers: {
+      "Content-Type": "application/json",
+      ...(p.key ? { Authorization: `Bearer ${p.key}` } : {}),
+    },
+  };
+}
+
 async function rawCall(
-  cfg: ChatProviderConfig,
+  endpoint: Endpoint,
   model: string,
   opts: ChatOptions,
   withTemperature: boolean,
 ): Promise<{ ok: true; text: string } | { ok: false; status: number; body: string }> {
-  const { url, headers } = endpointFor(cfg);
+  const { url, headers } = endpoint;
+
   const body: Record<string, unknown> = {
     model,
     messages: opts.messages,
