@@ -502,6 +502,10 @@ function SettingsPage() {
                 refine_budget: form.refine_budget,
                 omniroute_base_url: form.omniroute_base_url,
                 omniroute_model: form.omniroute_model,
+                fallback_provider: form.fallback_provider,
+                openrouter_api_key: form.openrouter_api_key,
+                openrouter_model: form.openrouter_model,
+                concept_model: form.concept_model,
               })
 
             }
