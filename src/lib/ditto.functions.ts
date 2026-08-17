@@ -689,7 +689,7 @@ ${excerpts.join("\n").slice(0, 30_000)}`,
       const userPrompt = `Исходный URL клона: ${row.source_url}
 Задача пользователя: ${brief || "(не указана — проведи собственный аудит и предложи глубокую переработку)"}
 Всего файлов в клоне: ${Object.keys(files).length}
-${blueprint}${mcp.summary ? `\n${mcp.summary}\n` : ""}${toolResultsBlock}${imageBlock}
+${conceptBlock}${blueprint}${mcp.summary ? `\n${mcp.summary}\n` : ""}${toolResultsBlock}${imageBlock}
 Пути (обрезано):
 ${fileList}
 
