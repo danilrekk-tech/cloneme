@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { getActiveMcpContext, callMcpTool, loadServersWithTools } from "./mcp.functions";
-import { loadEffectiveSettings } from "./settings.functions";
+import { loadEffectiveSettings, secondaryProviders } from "./settings.functions";
 import { callChat, parseJsonLoose } from "./ai-chat.server";
 
 
@@ -382,6 +382,7 @@ const refineSchema = z.object({
   model: z.string().min(1).max(120).optional(),
   temperature: z.number().min(0).max(2).optional(),
   research: z.boolean().optional(),
+  conceptId: z.string().uuid().optional(),
 
   selectedTools: z
     .array(
@@ -434,6 +435,18 @@ export const refineClone = createServerFn({ method: "POST" })
     const brief = (data.brief ?? "").trim();
     const selectedTools = data.selectedTools ?? [];
 
+    let concept: any = null;
+    if (data.conceptId) {
+      const { data: c } = await (supabase as any)
+        .from("clone_concepts")
+        .select("id, title, summary, spec")
+        .eq("id", data.conceptId)
+        .eq("user_id", userId)
+        .eq("job_id", row.id)
+        .maybeSingle();
+      concept = c ?? null;
+    }
+
     const { data: refRow, error: refErr } = await (supabase as any)
       .from("clone_refinements")
       .insert({
@@ -443,6 +456,7 @@ export const refineClone = createServerFn({ method: "POST" })
         brief: brief || null,
         status: "processing",
         model,
+        concept_id: concept?.id ?? null,
         selected_tools: selectedTools,
         settings: { model, temperature, budget },
       })
@@ -579,7 +593,15 @@ export const refineClone = createServerFn({ method: "POST" })
         lovableKey,
         omniBaseUrl: settings.omniroute_base_url,
         omniKey: settings.omniroute_api_key,
+        fallbacks: secondaryProviders(settings),
       } as const;
+
+      const conceptBlock = concept
+        ? `\nВЫБРАННЫЙ ВИЗУАЛЬНЫЙ КОНЦЕПТ (воссоздай его один-в-один как интерактивную страницу):
+Название: ${concept.title}
+Суть: ${concept.summary}
+Спецификация: ${safeStringify(concept.spec).slice(0, 3000)}\n`
+        : "";
 
       // --------- Pass 1: исследование конкурентов + макет ---------
       let blueprint = "";
@@ -667,7 +689,7 @@ ${excerpts.join("\n").slice(0, 30_000)}`,
       const userPrompt = `Исходный URL клона: ${row.source_url}
 Задача пользователя: ${brief || "(не указана — проведи собственный аудит и предложи глубокую переработку)"}
 Всего файлов в клоне: ${Object.keys(files).length}
-${blueprint}${mcp.summary ? `\n${mcp.summary}\n` : ""}${toolResultsBlock}${imageBlock}
+${conceptBlock}${blueprint}${mcp.summary ? `\n${mcp.summary}\n` : ""}${toolResultsBlock}${imageBlock}
 Пути (обрезано):
 ${fileList}
 

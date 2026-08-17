@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { lovable } from "@/integrations/lovable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -69,6 +70,32 @@ function AuthPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              disabled={loading}
+              onClick={async () => {
+                setLoading(true);
+                try {
+                  const res = await lovable.auth.signInWithOAuth("google", {
+                    redirect_uri: window.location.origin,
+                  });
+                  if ((res as any)?.error) throw (res as any).error;
+                  const { data } = await supabase.auth.getSession();
+                  if (data.session) navigate({ to: "/app" });
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : "Не удалось войти через Google");
+                } finally {
+                  setLoading(false);
+                }
+              }}
+            >
+              Продолжить с Google
+            </Button>
+            <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground">
+              <div className="h-px flex-1 bg-border" /> или по email <div className="h-px flex-1 bg-border" />
+            </div>
             <form onSubmit={onSubmit} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>

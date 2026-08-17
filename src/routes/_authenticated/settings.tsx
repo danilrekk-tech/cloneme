@@ -377,6 +377,63 @@ function SettingsPage() {
                 </p>
               </div>
 
+              <div className="space-y-2 sm:col-span-3">
+                <Label>Резервный провайдер (когда кончились токены Lovable)</Label>
+                <Select
+                  value={form.fallback_provider}
+                  onValueChange={(v) => setForm({ ...form, fallback_provider: v as UserSettings["fallback_provider"] })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Не использовать</SelectItem>
+                    <SelectItem value="openrouter">OpenRouter (в т.ч. бесплатные модели)</SelectItem>
+                    <SelectItem value="omniroute">Omniroute / локальный агент</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Если основной провайдер вернул 402/429/5xx — запрос автоматически уходит сюда.
+                </p>
+              </div>
+
+              {form.fallback_provider === "openrouter" ? (
+                <>
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="orkey">API-ключ OpenRouter</Label>
+                    <Input
+                      id="orkey"
+                      type="password"
+                      placeholder="sk-or-…"
+                      value={form.openrouter_api_key ?? ""}
+                      onChange={(e) => setForm({ ...form, openrouter_api_key: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="ormodel">Модель OpenRouter</Label>
+                    <Input
+                      id="ormodel"
+                      placeholder="google/gemini-2.0-flash-exp:free"
+                      value={form.openrouter_model ?? ""}
+                      onChange={(e) => setForm({ ...form, openrouter_model: e.target.value })}
+                    />
+                  </div>
+                </>
+              ) : null}
+
+              <div className="space-y-2 sm:col-span-3">
+                <Label htmlFor="conceptmodel">Модель для визуальных концептов</Label>
+                <Input
+                  id="conceptmodel"
+                  placeholder="google/gemini-3.1-flash-image"
+                  value={form.concept_model}
+                  onChange={(e) => setForm({ ...form, concept_model: e.target.value })}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Используется, когда AI рисует 3 варианта дизайна перед доработкой.
+                </p>
+              </div>
+
               <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3 sm:col-span-3">
                 <input
                   type="checkbox"
@@ -445,6 +502,10 @@ function SettingsPage() {
                 refine_budget: form.refine_budget,
                 omniroute_base_url: form.omniroute_base_url,
                 omniroute_model: form.omniroute_model,
+                fallback_provider: form.fallback_provider,
+                openrouter_api_key: form.openrouter_api_key,
+                openrouter_model: form.openrouter_model,
+                concept_model: form.concept_model,
               })
 
             }
