@@ -435,6 +435,18 @@ export const refineClone = createServerFn({ method: "POST" })
     const brief = (data.brief ?? "").trim();
     const selectedTools = data.selectedTools ?? [];
 
+    let concept: any = null;
+    if (data.conceptId) {
+      const { data: c } = await (supabase as any)
+        .from("clone_concepts")
+        .select("id, title, summary, spec")
+        .eq("id", data.conceptId)
+        .eq("user_id", userId)
+        .eq("job_id", row.id)
+        .maybeSingle();
+      concept = c ?? null;
+    }
+
     const { data: refRow, error: refErr } = await (supabase as any)
       .from("clone_refinements")
       .insert({
@@ -444,6 +456,7 @@ export const refineClone = createServerFn({ method: "POST" })
         brief: brief || null,
         status: "processing",
         model,
+        concept_id: concept?.id ?? null,
         selected_tools: selectedTools,
         settings: { model, temperature, budget },
       })
