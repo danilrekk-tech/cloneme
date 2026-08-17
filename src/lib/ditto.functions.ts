@@ -382,6 +382,7 @@ const refineSchema = z.object({
   model: z.string().min(1).max(120).optional(),
   temperature: z.number().min(0).max(2).optional(),
   research: z.boolean().optional(),
+  conceptId: z.string().uuid().optional(),
 
   selectedTools: z
     .array(
