@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { getActiveMcpContext, callMcpTool, loadServersWithTools } from "./mcp.functions";
-import { loadEffectiveSettings } from "./settings.functions";
+import { loadEffectiveSettings, secondaryProviders } from "./settings.functions";
 import { callChat, parseJsonLoose } from "./ai-chat.server";
 
 
