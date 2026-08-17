@@ -593,7 +593,15 @@ export const refineClone = createServerFn({ method: "POST" })
         lovableKey,
         omniBaseUrl: settings.omniroute_base_url,
         omniKey: settings.omniroute_api_key,
+        fallbacks: secondaryProviders(settings),
       } as const;
+
+      const conceptBlock = concept
+        ? `\nВЫБРАННЫЙ ВИЗУАЛЬНЫЙ КОНЦЕПТ (воссоздай его один-в-один как интерактивную страницу):
+Название: ${concept.title}
+Суть: ${concept.summary}
+Спецификация: ${safeStringify(concept.spec).slice(0, 3000)}\n`
+        : "";
 
       // --------- Pass 1: исследование конкурентов + макет ---------
       let blueprint = "";
