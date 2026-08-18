@@ -22,10 +22,14 @@ import {
   FileText,
   GitCompare,
   History,
+  Image as ImageIcon,
   Loader2,
+  Monitor,
   Sparkles,
   Trash2,
+  Wand2,
 } from "lucide-react";
+
 
 export const Route = createFileRoute("/_authenticated/preview/$jobId")({
   head: () => ({ meta: [{ title: "Просмотр клона — Clone Studio" }] }),
