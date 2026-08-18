@@ -23,13 +23,16 @@ export type SecondaryProvider = {
 };
 
 export type ChatProviderConfig = {
-  provider: "lovable" | "omniroute";
+  provider: "lovable" | "omniroute" | "openrouter";
   lovableKey?: string;
   omniBaseUrl?: string | null;
   omniKey?: string | null;
+  openrouterKey?: string | null;
+  openrouterModel?: string | null;
   /** Провайдеры, на которые переключаемся, когда основной недоступен (например, кончились токены Lovable). */
   fallbacks?: SecondaryProvider[];
 };
+
 
 
 export type ChatOptions = {
