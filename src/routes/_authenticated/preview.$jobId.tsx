@@ -80,8 +80,40 @@ function PreviewPage() {
     },
   });
 
-  const [tab, setTab] = useState<"refined" | "diff" | "source" | "files" | "history">("refined");
+  const [tab, setTab] = useState<
+    "refined" | "concepts" | "live" | "diff" | "source" | "files" | "history"
+  >("refined");
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+
+  const genConceptsFn = useServerFn(generateConcepts);
+  const listConceptsFn = useServerFn(listConcepts);
+  const refineFn = useServerFn(refineClone);
+
+  const conceptsQ = useQuery({
+    queryKey: ["clone_concepts", jobId],
+    queryFn: () => listConceptsFn({ data: { jobId } }) as Promise<any[]>,
+    enabled: tab === "concepts",
+  });
+
+  const genConceptsMut = useMutation({
+    mutationFn: (brief: string) => genConceptsFn({ data: { jobId, brief } }),
+    onSuccess: () => {
+      toast.success("Варианты дизайна готовы");
+      qc.invalidateQueries({ queryKey: ["clone_concepts", jobId] });
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Не удалось создать варианты"),
+  });
+
+  const recreateMut = useMutation({
+    mutationFn: (conceptId: string) => refineFn({ data: { id: jobId, conceptId } }),
+    onSuccess: () => {
+      toast.success("Воссоздание запущено");
+      qc.invalidateQueries({ queryKey: ["clone_preview", jobId] });
+      setTab("history");
+    },
+    onError: (e: any) => toast.error(e?.message ?? "Ошибка доработки"),
+  });
+
 
   const activateMut = useMutation({
     mutationFn: (rid: string) => activateFn({ data: { jobId, refinementId: rid } }),
