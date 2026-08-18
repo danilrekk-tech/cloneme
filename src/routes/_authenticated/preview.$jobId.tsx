@@ -211,7 +211,19 @@ function PreviewPage() {
           ) : (
             <EmptyRefined onSource={() => setTab("source")} />
           )
+        ) : tab === "concepts" ? (
+          <ConceptsView
+            concepts={conceptsQ.data ?? []}
+            loading={conceptsQ.isLoading}
+            generating={genConceptsMut.isPending}
+            onGenerate={(brief) => genConceptsMut.mutate(brief)}
+            onRecreate={(id) => recreateMut.mutate(id)}
+            recreatingId={recreateMut.isPending ? (recreateMut.variables as string) : null}
+          />
+        ) : tab === "live" ? (
+          <LiveView files={files} sourceUrl={q.data?.sourceUrl ?? ""} />
         ) : tab === "diff" ? (
+
           hasRefined ? (
             <DiffView original={pickOriginalHtml(files)} refined={active!.previewHtml} />
           ) : (
