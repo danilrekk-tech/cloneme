@@ -172,9 +172,16 @@ function PreviewPage() {
             <TabBtn active={tab === "refined"} onClick={() => setTab("refined")} disabled={!hasRefined}>
               <Sparkles className="mr-1.5 h-3.5 w-3.5" /> AI-версия
             </TabBtn>
+            <TabBtn active={tab === "concepts"} onClick={() => setTab("concepts")}>
+              <ImageIcon className="mr-1.5 h-3.5 w-3.5" /> Варианты
+            </TabBtn>
+            <TabBtn active={tab === "live"} onClick={() => setTab("live")}>
+              <Monitor className="mr-1.5 h-3.5 w-3.5" /> Живой исходник
+            </TabBtn>
             <TabBtn active={tab === "diff"} onClick={() => setTab("diff")} disabled={!hasRefined}>
               <GitCompare className="mr-1.5 h-3.5 w-3.5" /> Diff
             </TabBtn>
+
             <TabBtn active={tab === "history"} onClick={() => setTab("history")}>
               <History className="mr-1.5 h-3.5 w-3.5" /> История
               {q.data?.refinements?.length ? (
