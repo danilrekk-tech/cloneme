@@ -306,8 +306,17 @@ export async function generateImage(
   opts: { prompt: string; model?: string | null; timeoutMs?: number },
 ): Promise<ImageResult> {
   const notes: string[] = [];
-  const primary = endpointFor(cfg);
-  const primaryLabel = cfg.provider === "omniroute" ? "Omniroute" : "Lovable AI";
+  // OpenRouter не даёт бесплатной генерации изображений — для картинок
+  // используем Lovable AI, если ключ доступен.
+  const imageCfg: ChatProviderConfig =
+    cfg.provider === "openrouter" && cfg.lovableKey ? { ...cfg, provider: "lovable" } : cfg;
+  const primary = endpointFor(imageCfg);
+  const primaryLabel =
+    imageCfg.provider === "omniroute"
+      ? "Omniroute"
+      : imageCfg.provider === "openrouter"
+        ? "OpenRouter"
+        : "Lovable AI";
 
   const attempts: Array<{ endpoint: Endpoint; model: string; label: string }> = [];
   const models: string[] = [];
