@@ -66,10 +66,11 @@ export const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 /** Бесплатные модели OpenRouter в порядке предпочтения. */
 export const OPENROUTER_FREE_CHAIN = [
-  "deepseek/deepseek-chat-v3-0324:free",
-  "google/gemini-2.0-flash-exp:free",
-  "meta-llama/llama-3.3-70b-instruct:free",
-  "qwen/qwen-2.5-72b-instruct:free",
+  "minimax/minimax-m3:free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
+  "z-ai/glm-5.2:free",
+  "minimax/minimax-m2.7:free",
+  "google/gemma-4-31b-it:free",
 ];
 
 /**
@@ -78,7 +79,7 @@ export const OPENROUTER_FREE_CHAIN = [
  * поэтому подменяем их бесплатным аналогом.
  */
 export function toOpenRouterModel(model: string, preferred?: string | null): string {
-  if (model.includes(":free") || /^(deepseek|qwen|mistralai|meta-llama|nousresearch)\//.test(model)) {
+  if (model.includes(":free") || /^(deepseek|qwen|mistralai|meta-llama|minimax|nvidia|z-ai|google\/gemma)/.test(model)) {
     return model;
   }
   return preferred || OPENROUTER_FREE_CHAIN[0];

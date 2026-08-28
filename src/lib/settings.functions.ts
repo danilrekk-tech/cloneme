@@ -28,15 +28,15 @@ const DEFAULTS: UserSettings = {
   default_mode: "single",
   default_framework: "next",
   default_styling: "tailwind",
-  refine_model: "deepseek/deepseek-chat-v3-0324:free",
-  refine_fallback_model: "google/gemini-2.0-flash-exp:free",
+  refine_model: "minimax/minimax-m3:free",
+  refine_fallback_model: "nvidia/nemotron-3-super-120b-a12b:free",
   refine_provider: "openrouter",
   refine_research: true,
   refine_temperature: 0.6,
   refine_budget: 60000,
   fallback_provider: "none",
   openrouter_api_key: null,
-  openrouter_model: "deepseek/deepseek-chat-v3-0324:free",
+  openrouter_model: "minimax/minimax-m3:free",
   concept_model: "google/gemini-3.1-flash-image",
 };
 
@@ -132,7 +132,7 @@ export function secondaryProviders(s: UserSettings) {
       label: "OpenRouter",
       baseUrl: "https://openrouter.ai/api/v1",
       key: s.openrouter_api_key,
-      model: s.openrouter_model || "google/gemini-2.0-flash-exp:free",
+      model: s.openrouter_model || "nvidia/nemotron-3-super-120b-a12b:free",
     });
   }
   if (s.fallback_provider === "omniroute" && s.omniroute_base_url) {

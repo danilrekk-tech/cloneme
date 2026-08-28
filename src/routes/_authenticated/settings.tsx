@@ -286,7 +286,7 @@ function SettingsPage() {
                       <span className="flex flex-col">
                         <span className="font-medium">OpenRouter — бесплатные модели (рекомендуется)</span>
                         <span className="text-xs text-muted-foreground">
-                          DeepSeek V3, Gemini Flash, Llama 3.3 — без расхода кредитов Lovable
+                          MiniMax M3, Nemotron, GLM — без расхода кредитов Lovable
                         </span>
                       </span>
                     </SelectItem>
@@ -326,7 +326,7 @@ function SettingsPage() {
                     <Label htmlFor="ormodel-main">Модель OpenRouter</Label>
                     <Input
                       id="ormodel-main"
-                      placeholder="deepseek/deepseek-chat-v3-0324:free"
+                      placeholder="minimax/minimax-m3:free"
                       value={form.openrouter_model ?? ""}
                       onChange={(e) => setForm({ ...form, openrouter_model: e.target.value })}
                     />
