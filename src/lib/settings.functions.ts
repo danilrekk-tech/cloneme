@@ -11,7 +11,7 @@ export type UserSettings = {
   default_styling: "tailwind" | "css";
   refine_model: string;
   refine_fallback_model: string;
-  refine_provider: "lovable" | "omniroute";
+  refine_provider: "lovable" | "omniroute" | "openrouter";
   refine_research: boolean;
   refine_temperature: number;
   refine_budget: number;
@@ -28,15 +28,15 @@ const DEFAULTS: UserSettings = {
   default_mode: "single",
   default_framework: "next",
   default_styling: "tailwind",
-  refine_model: "google/gemini-2.5-pro",
-  refine_fallback_model: "google/gemini-2.5-flash",
-  refine_provider: "lovable",
+  refine_model: "deepseek/deepseek-chat-v3-0324:free",
+  refine_fallback_model: "google/gemini-2.0-flash-exp:free",
+  refine_provider: "openrouter",
   refine_research: true,
   refine_temperature: 0.6,
   refine_budget: 60000,
   fallback_provider: "none",
   openrouter_api_key: null,
-  openrouter_model: null,
+  openrouter_model: "deepseek/deepseek-chat-v3-0324:free",
   concept_model: "google/gemini-3.1-flash-image",
 };
 
@@ -51,7 +51,7 @@ function toSettings(data: any): UserSettings {
     default_styling: data.default_styling ?? DEFAULTS.default_styling,
     refine_model: data.refine_model ?? DEFAULTS.refine_model,
     refine_fallback_model: data.refine_fallback_model ?? DEFAULTS.refine_fallback_model,
-    refine_provider: (data.refine_provider ?? DEFAULTS.refine_provider) as "lovable" | "omniroute",
+    refine_provider: (data.refine_provider ?? DEFAULTS.refine_provider) as UserSettings["refine_provider"],
     refine_research: data.refine_research ?? DEFAULTS.refine_research,
     refine_temperature: Number(data.refine_temperature ?? DEFAULTS.refine_temperature),
     refine_budget: data.refine_budget ?? DEFAULTS.refine_budget,
@@ -83,7 +83,7 @@ const saveSchema = z.object({
   default_styling: z.enum(["tailwind", "css"]).optional(),
   refine_model: z.string().min(1).max(120).optional(),
   refine_fallback_model: z.string().min(1).max(120).optional(),
-  refine_provider: z.enum(["lovable", "omniroute"]).optional(),
+  refine_provider: z.enum(["lovable", "omniroute", "openrouter"]).optional(),
   refine_research: z.boolean().optional(),
   refine_temperature: z.number().min(0).max(2).optional(),
   refine_budget: z.number().int().min(10000).max(200000).optional(),
