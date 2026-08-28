@@ -404,7 +404,7 @@ export const refineClone = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     const lovableKey = process.env.LOVABLE_API_KEY;
-    if (!lovableKey) throw new Error("LOVABLE_API_KEY не настроен");
+    const openrouterKey = process.env.OPENROUTER_API_KEY;
 
     const settings = await loadEffectiveSettings(supabase, userId);
     const model = data.model?.trim() || settings.refine_model || DEFAULT_REFINE_MODEL;
@@ -593,6 +593,8 @@ export const refineClone = createServerFn({ method: "POST" })
         lovableKey,
         omniBaseUrl: settings.omniroute_base_url,
         omniKey: settings.omniroute_api_key,
+        openrouterKey: settings.openrouter_api_key || openrouterKey,
+        openrouterModel: settings.openrouter_model,
         fallbacks: secondaryProviders(settings),
       } as const;
 
@@ -608,9 +610,7 @@ export const refineClone = createServerFn({ method: "POST" })
       if (doResearch) {
         try {
           const researchModel =
-            settings.refine_provider === "omniroute"
-              ? model
-              : "google/gemini-3.6-flash";
+            settings.refine_provider === "lovable" ? "google/gemini-3.6-flash" : model;
           const res = await callChat(providerCfg, {
             model: researchModel,
             fallbackModel: settings.refine_fallback_model,
