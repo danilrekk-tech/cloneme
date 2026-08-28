@@ -62,7 +62,47 @@ function normalizeBase(base: string): string {
   return `${b}/v1/chat/completions`;
 }
 
+export const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+
+/** Бесплатные модели OpenRouter в порядке предпочтения. */
+export const OPENROUTER_FREE_CHAIN = [
+  "minimax/minimax-m3:free",
+  "nvidia/nemotron-3-super-120b-a12b:free",
+  "z-ai/glm-5.2:free",
+  "minimax/minimax-m2.7:free",
+  "google/gemma-4-31b-it:free",
+];
+
+/**
+ * Приводит идентификатор модели к тому, что понимает OpenRouter.
+ * Модели Lovable-каталога (google/gemini-3.x, openai/gpt-5.x) там недоступны,
+ * поэтому подменяем их бесплатным аналогом.
+ */
+export function toOpenRouterModel(model: string, preferred?: string | null): string {
+  if (model.includes(":free") || /^(deepseek|qwen|mistralai|meta-llama|minimax|nvidia|z-ai|google\/gemma)/.test(model)) {
+    return model;
+  }
+  return preferred || OPENROUTER_FREE_CHAIN[0];
+}
+
 function endpointFor(cfg: ChatProviderConfig): { url: string; headers: Record<string, string> } {
+  if (cfg.provider === "openrouter") {
+    const key = cfg.openrouterKey;
+    if (!key) {
+      throw new Error(
+        "Не задан ключ OpenRouter. Добавьте его в Настройках → Провайдер ИИ.",
+      );
+    }
+    return {
+      url: OPENROUTER_URL,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${key}`,
+        "HTTP-Referer": "https://cloneme.lovable.app",
+        "X-Title": "Clone Studio",
+      },
+    };
+  }
   if (cfg.provider === "omniroute") {
     if (!cfg.omniBaseUrl) {
       throw new Error(
@@ -154,16 +194,23 @@ export async function callChat(cfg: ChatProviderConfig, opts: ChatOptions): Prom
   type Attempt = { endpoint: Endpoint; model: string; label: string };
   const attempts: Attempt[] = [];
   const primary = endpointFor(cfg);
-  const primaryLabel = cfg.provider === "omniroute" ? "Omniroute" : "Lovable AI";
+  const primaryLabel =
+    cfg.provider === "omniroute" ? "Omniroute" : cfg.provider === "openrouter" ? "OpenRouter" : "Lovable AI";
 
   const models: string[] = [];
   const push = (m?: string | null) => {
     if (m && !models.includes(m)) models.push(m);
   };
-  push(opts.model);
-  push(opts.fallbackModel);
-  // Резервные дешёвые модели — только для Lovable AI.
-  if (cfg.provider === "lovable") FALLBACK_CHAIN.forEach(push);
+  if (cfg.provider === "openrouter") {
+    push(toOpenRouterModel(opts.model, cfg.openrouterModel));
+    push(toOpenRouterModel(opts.fallbackModel ?? "", cfg.openrouterModel));
+    OPENROUTER_FREE_CHAIN.forEach(push);
+  } else {
+    push(opts.model);
+    push(opts.fallbackModel);
+    // Резервные дешёвые модели — только для Lovable AI.
+    if (cfg.provider === "lovable") FALLBACK_CHAIN.forEach(push);
+  }
   for (const m of models) attempts.push({ endpoint: primary, model: m, label: primaryLabel });
 
   // Резервные провайдеры (например, OpenRouter), когда у основного кончились токены.
@@ -260,8 +307,17 @@ export async function generateImage(
   opts: { prompt: string; model?: string | null; timeoutMs?: number },
 ): Promise<ImageResult> {
   const notes: string[] = [];
-  const primary = endpointFor(cfg);
-  const primaryLabel = cfg.provider === "omniroute" ? "Omniroute" : "Lovable AI";
+  // OpenRouter не даёт бесплатной генерации изображений — для картинок
+  // используем Lovable AI, если ключ доступен.
+  const imageCfg: ChatProviderConfig =
+    cfg.provider === "openrouter" && cfg.lovableKey ? { ...cfg, provider: "lovable" } : cfg;
+  const primary = endpointFor(imageCfg);
+  const primaryLabel =
+    imageCfg.provider === "omniroute"
+      ? "Omniroute"
+      : imageCfg.provider === "openrouter"
+        ? "OpenRouter"
+        : "Lovable AI";
 
   const attempts: Array<{ endpoint: Endpoint; model: string; label: string }> = [];
   const models: string[] = [];

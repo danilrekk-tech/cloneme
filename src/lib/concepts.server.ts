@@ -51,7 +51,7 @@ export async function runConceptGeneration(
   brief: string,
 ) {
   const lovableKey = process.env['LOVABLE_API_KEY'];
-  if (!lovableKey) throw new Error("LOVABLE_API_KEY не настроен");
+  const openrouterKey = process.env['OPENROUTER_API_KEY'];
 
   const { data: job } = await supabase
     .from("clone_jobs")
@@ -68,6 +68,8 @@ export async function runConceptGeneration(
     lovableKey,
     omniBaseUrl: settings.omniroute_base_url,
     omniKey: settings.omniroute_api_key,
+    openrouterKey: settings.openrouter_api_key || openrouterKey,
+    openrouterModel: settings.openrouter_model,
     fallbacks: secondaryProviders(settings),
   } as const;
 
