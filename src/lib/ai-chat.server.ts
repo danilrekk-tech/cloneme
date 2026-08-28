@@ -193,16 +193,23 @@ export async function callChat(cfg: ChatProviderConfig, opts: ChatOptions): Prom
   type Attempt = { endpoint: Endpoint; model: string; label: string };
   const attempts: Attempt[] = [];
   const primary = endpointFor(cfg);
-  const primaryLabel = cfg.provider === "omniroute" ? "Omniroute" : "Lovable AI";
+  const primaryLabel =
+    cfg.provider === "omniroute" ? "Omniroute" : cfg.provider === "openrouter" ? "OpenRouter" : "Lovable AI";
 
   const models: string[] = [];
   const push = (m?: string | null) => {
     if (m && !models.includes(m)) models.push(m);
   };
-  push(opts.model);
-  push(opts.fallbackModel);
-  // Резервные дешёвые модели — только для Lovable AI.
-  if (cfg.provider === "lovable") FALLBACK_CHAIN.forEach(push);
+  if (cfg.provider === "openrouter") {
+    push(toOpenRouterModel(opts.model, cfg.openrouterModel));
+    push(toOpenRouterModel(opts.fallbackModel ?? "", cfg.openrouterModel));
+    OPENROUTER_FREE_CHAIN.forEach(push);
+  } else {
+    push(opts.model);
+    push(opts.fallbackModel);
+    // Резервные дешёвые модели — только для Lovable AI.
+    if (cfg.provider === "lovable") FALLBACK_CHAIN.forEach(push);
+  }
   for (const m of models) attempts.push({ endpoint: primary, model: m, label: primaryLabel });
 
   // Резервные провайдеры (например, OpenRouter), когда у основного кончились токены.
