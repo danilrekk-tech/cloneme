@@ -282,6 +282,14 @@ function SettingsPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="openrouter">
+                      <span className="flex flex-col">
+                        <span className="font-medium">OpenRouter — бесплатные модели (рекомендуется)</span>
+                        <span className="text-xs text-muted-foreground">
+                          DeepSeek V3, Gemini Flash, Llama 3.3 — без расхода кредитов Lovable
+                        </span>
+                      </span>
+                    </SelectItem>
                     <SelectItem value="lovable">
                       <span className="flex flex-col">
                         <span className="font-medium">Встроенные модели (без ключа)</span>
