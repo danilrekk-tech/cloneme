@@ -62,7 +62,46 @@ function normalizeBase(base: string): string {
   return `${b}/v1/chat/completions`;
 }
 
+export const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+
+/** Бесплатные модели OpenRouter в порядке предпочтения. */
+export const OPENROUTER_FREE_CHAIN = [
+  "deepseek/deepseek-chat-v3-0324:free",
+  "google/gemini-2.0-flash-exp:free",
+  "meta-llama/llama-3.3-70b-instruct:free",
+  "qwen/qwen-2.5-72b-instruct:free",
+];
+
+/**
+ * Приводит идентификатор модели к тому, что понимает OpenRouter.
+ * Модели Lovable-каталога (google/gemini-3.x, openai/gpt-5.x) там недоступны,
+ * поэтому подменяем их бесплатным аналогом.
+ */
+export function toOpenRouterModel(model: string, preferred?: string | null): string {
+  if (model.includes(":free") || /^(deepseek|qwen|mistralai|meta-llama|nousresearch)\//.test(model)) {
+    return model;
+  }
+  return preferred || OPENROUTER_FREE_CHAIN[0];
+}
+
 function endpointFor(cfg: ChatProviderConfig): { url: string; headers: Record<string, string> } {
+  if (cfg.provider === "openrouter") {
+    const key = cfg.openrouterKey;
+    if (!key) {
+      throw new Error(
+        "Не задан ключ OpenRouter. Добавьте его в Настройках → Провайдер ИИ.",
+      );
+    }
+    return {
+      url: OPENROUTER_URL,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${key}`,
+        "HTTP-Referer": "https://cloneme.lovable.app",
+        "X-Title": "Clone Studio",
+      },
+    };
+  }
   if (cfg.provider === "omniroute") {
     if (!cfg.omniBaseUrl) {
       throw new Error(
