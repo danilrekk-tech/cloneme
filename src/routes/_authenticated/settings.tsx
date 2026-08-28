@@ -310,6 +310,33 @@ function SettingsPage() {
                 </Select>
               </div>
 
+              {form.refine_provider === "openrouter" ? (
+                <>
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="orkey-main">API-ключ OpenRouter (необязательно)</Label>
+                    <Input
+                      id="orkey-main"
+                      type="password"
+                      placeholder="sk-or-v1-… (по умолчанию используется общий ключ сервиса)"
+                      value={form.openrouter_api_key ?? ""}
+                      onChange={(e) => setForm({ ...form, openrouter_api_key: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="ormodel-main">Модель OpenRouter</Label>
+                    <Input
+                      id="ormodel-main"
+                      placeholder="deepseek/deepseek-chat-v3-0324:free"
+                      value={form.openrouter_model ?? ""}
+                      onChange={(e) => setForm({ ...form, openrouter_model: e.target.value })}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Пусто — подберём бесплатную модель автоматически.
+                    </p>
+                  </div>
+                </>
+              ) : null}
+
               {form.refine_provider === "omniroute" ? (
                 <>
                   <div className="space-y-2 sm:col-span-2">
