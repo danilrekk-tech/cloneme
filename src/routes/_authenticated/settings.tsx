@@ -290,6 +290,14 @@ function SettingsPage() {
                         </span>
                       </span>
                     </SelectItem>
+                    <SelectItem value="gemini">
+                      <span className="flex flex-col">
+                        <span className="font-medium">Google Gemini (прямой API)</span>
+                        <span className="text-xs text-muted-foreground">
+                          Ваш GEMINI_API_KEY, модели gemini-2.5-flash / 2.5-pro
+                        </span>
+                      </span>
+                    </SelectItem>
                     <SelectItem value="lovable">
                       <span className="flex flex-col">
                         <span className="font-medium">Встроенные модели (без ключа)</span>
@@ -333,6 +341,30 @@ function SettingsPage() {
                     <p className="text-xs text-muted-foreground">
                       Пусто — подберём бесплатную модель автоматически.
                     </p>
+                  </div>
+                </>
+              ) : null}
+
+              {form.refine_provider === "gemini" ? (
+                <>
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="gemkey-main">API-ключ Google Gemini (необязательно)</Label>
+                    <Input
+                      id="gemkey-main"
+                      type="password"
+                      placeholder="AIza… (по умолчанию используется ключ сервиса)"
+                      value={form.gemini_api_key ?? ""}
+                      onChange={(e) => setForm({ ...form, gemini_api_key: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="gemmodel-main">Модель Gemini</Label>
+                    <Input
+                      id="gemmodel-main"
+                      placeholder="gemini-2.5-flash"
+                      value={form.gemini_model ?? ""}
+                      onChange={(e) => setForm({ ...form, gemini_model: e.target.value })}
+                    />
                   </div>
                 </>
               ) : null}
@@ -424,6 +456,7 @@ function SettingsPage() {
                   <SelectContent>
                     <SelectItem value="none">Не использовать</SelectItem>
                     <SelectItem value="openrouter">OpenRouter (в т.ч. бесплатные модели)</SelectItem>
+                    <SelectItem value="gemini">Google Gemini (прямой API)</SelectItem>
                     <SelectItem value="omniroute">Omniroute / локальный агент</SelectItem>
                   </SelectContent>
                 </Select>
@@ -451,6 +484,30 @@ function SettingsPage() {
                       placeholder="google/gemini-2.0-flash-exp:free"
                       value={form.openrouter_model ?? ""}
                       onChange={(e) => setForm({ ...form, openrouter_model: e.target.value })}
+                    />
+                  </div>
+                </>
+              ) : null}
+
+              {form.fallback_provider === "gemini" ? (
+                <>
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label htmlFor="gemkey">API-ключ Google Gemini</Label>
+                    <Input
+                      id="gemkey"
+                      type="password"
+                      placeholder="AIza…"
+                      value={form.gemini_api_key ?? ""}
+                      onChange={(e) => setForm({ ...form, gemini_api_key: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="gemmodel">Модель Gemini</Label>
+                    <Input
+                      id="gemmodel"
+                      placeholder="gemini-2.5-flash"
+                      value={form.gemini_model ?? ""}
+                      onChange={(e) => setForm({ ...form, gemini_model: e.target.value })}
                     />
                   </div>
                 </>
@@ -540,6 +597,8 @@ function SettingsPage() {
                 fallback_provider: form.fallback_provider,
                 openrouter_api_key: form.openrouter_api_key,
                 openrouter_model: form.openrouter_model,
+                gemini_api_key: form.gemini_api_key,
+                gemini_model: form.gemini_model,
                 concept_model: form.concept_model,
               })
 

@@ -69,6 +69,8 @@ export async function runConceptGeneration(
     omniBaseUrl: settings.omniroute_base_url,
     omniKey: settings.omniroute_api_key,
     openrouterKey: settings.openrouter_api_key || openrouterKey,
+        geminiKey: settings.gemini_api_key || process.env['GEMINI_API_KEY'],
+        geminiModel: settings.gemini_model,
     openrouterModel: settings.openrouter_model,
     fallbacks: secondaryProviders(settings),
   } as const;

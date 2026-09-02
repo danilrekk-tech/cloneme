@@ -4,6 +4,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { getActiveMcpContext, callMcpTool, loadServersWithTools } from "./mcp.functions";
 import { loadEffectiveSettings, secondaryProviders } from "./settings.functions";
 import { callChat, parseJsonLoose } from "./ai-chat.server";
+import { clonePage } from "./cloner.server";
 
 
 const DITTO_BASE = "https://api.ditto.site/v1";
@@ -28,9 +29,7 @@ type FileEntry = {
 type FileMap = Record<string, FileEntry>;
 
 function requireDittoKey(): string {
-  const key = process.env.DITTO_API_KEY;
-  if (!key) throw new Error("DITTO_API_KEY не настроен на сервере");
-  return key;
+  return process.env.DITTO_API_KEY ?? "";
 }
 
 function isTerminal(status: string): boolean {
@@ -87,12 +86,48 @@ async function fetchAndStoreResult(
   return { filesPath: path, summary };
 }
 
+/** Клонирует страницу встроенным движком и сохраняет результат. */
+async function runBuiltinClone(
+  supabase: any,
+  userId: string,
+  rowId: string,
+  url: string,
+  note: string,
+) {
+  try {
+    const files = (await clonePage(url)) as unknown as FileMap;
+    const summary = summarizeFiles(files);
+    const filesPath = await uploadFilesJson(supabase, userId, rowId, files);
+    const { data: updated } = await supabase
+      .from("clone_jobs")
+      .update({
+        status: "succeeded",
+        files_path: filesPath,
+        result: { files: summary, engine: "builtin", note },
+        error: null,
+      })
+      .eq("id", rowId)
+      .select()
+      .single();
+    return updated;
+  } catch (e: any) {
+    const msg = `Встроенный клонировщик: ${String(e?.message ?? e).slice(0, 400)}`;
+    const { data: updated } = await supabase
+      .from("clone_jobs")
+      .update({ status: "failed", error: msg })
+      .eq("id", rowId)
+      .select()
+      .single();
+    return updated;
+  }
+}
+
 export const createCloneJob = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((raw: unknown) => createSchema.parse(raw))
   .handler(async ({ data, context }) => {
-    const key = requireDittoKey();
     const { supabase, userId } = context;
+    const key = process.env.DITTO_API_KEY ?? null;
 
     const { data: row, error: insertErr } = await supabase
       .from("clone_jobs")
@@ -108,22 +143,27 @@ export const createCloneJob = createServerFn({ method: "POST" })
       .single();
     if (insertErr || !row) throw new Error(insertErr?.message ?? "Не удалось создать задачу");
 
-    const res = await fetch(`${DITTO_BASE}/clones`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        url: data.url,
-        options: { mode: data.mode, framework: data.framework, styling: data.styling },
-      }),
-    });
+    const builtin = (note: string) => runBuiltinClone(supabase, userId, row.id, data.url, note);
+
+    if (!key) return (await builtin("DITTO_API_KEY не настроен — использован встроенный движок")) ?? row;
+
+    let res: Response;
+    try {
+      res = await fetch(`${DITTO_BASE}/clones`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: data.url,
+          options: { mode: data.mode, framework: data.framework, styling: data.styling },
+        }),
+      });
+    } catch (e: any) {
+      return (await builtin(`Ditto недоступен (${String(e?.message ?? e).slice(0, 120)})`)) ?? row;
+    }
 
     const text = await res.text();
     if (!res.ok) {
-      await supabase
-        .from("clone_jobs")
-        .update({ status: "failed", error: `Ditto API ${res.status}: ${text.slice(0, 800)}` })
-        .eq("id", row.id);
-      throw new Error(`Ditto API ${res.status}: ${text.slice(0, 500)}`);
+      return (await builtin(`Ditto ответил ${res.status} — использован встроенный движок`)) ?? row;
     }
 
     let body: any = {};
@@ -140,11 +180,39 @@ export const createCloneJob = createServerFn({ method: "POST" })
       filesPath = await uploadFilesJson(supabase, userId, row.id, body.files as FileMap);
     }
 
+    // Ditto часто оставляет задачу в очереди навсегда — ждём немного и,
+    // если прогресса нет, клонируем сами, чтобы пользователь получил результат.
+    if (jobId && !filesPath) {
+      for (let i = 0; i < 4; i++) {
+        await new Promise((r) => setTimeout(r, 4000));
+        try {
+          const st = await fetch(`${DITTO_BASE}/clones/${encodeURIComponent(jobId)}`, {
+            headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
+          });
+          const meta: any = st.ok ? await st.json() : {};
+          if (meta.status && meta.status !== "queued") {
+            const { data: updated } = await supabase
+              .from("clone_jobs")
+              .update({ ditto_job_id: jobId, status: meta.status, last_event: meta })
+              .eq("id", row.id)
+              .select()
+              .single();
+            return updated ?? row;
+          }
+        } catch {
+          break;
+        }
+      }
+      return (
+        (await builtin("Ditto не начал обработку — страница склонирована встроенным движком")) ?? row
+      );
+    }
+
     const { data: updated } = await supabase
       .from("clone_jobs")
       .update({
         ditto_job_id: jobId,
-        status,
+        status: filesPath ? "succeeded" : status,
         files_path: filesPath,
         result: summary ? { files: summary } : null,
       })
@@ -154,6 +222,7 @@ export const createCloneJob = createServerFn({ method: "POST" })
 
     return updated ?? row;
   });
+
 
 export const listCloneJobs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -173,7 +242,7 @@ export const refreshCloneJob = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((raw: unknown) => z.object({ id: z.string().uuid() }).parse(raw))
   .handler(async ({ data, context }) => {
-    const key = requireDittoKey();
+    const key = process.env.DITTO_API_KEY ?? null;
     const { supabase, userId } = context;
 
     const { data: row, error } = await supabase
@@ -183,13 +252,41 @@ export const refreshCloneJob = createServerFn({ method: "POST" })
       .eq("user_id", userId)
       .single();
     if (error || !row) throw new Error("Задача не найдена");
-    if (!row.ditto_job_id) return row;
+
+    const ageMs = Date.now() - new Date(row.created_at ?? Date.now()).getTime();
+    const stalled = ageMs > 90_000 && !row.files_path && !isTerminal(row.status ?? "");
+
+    if (!row.ditto_job_id || !key) {
+      if (stalled) {
+        return (
+          (await runBuiltinClone(
+            supabase,
+            userId,
+            row.id,
+            row.source_url,
+            "Задача зависла — результат получен встроенным движком",
+          )) ?? row
+        );
+      }
+      return row;
+    }
 
     const statusRes = await fetch(`${DITTO_BASE}/clones/${encodeURIComponent(row.ditto_job_id)}`, {
       headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
     });
     const statusText = await statusRes.text();
     if (!statusRes.ok) {
+      if (stalled) {
+        return (
+          (await runBuiltinClone(
+            supabase,
+            userId,
+            row.id,
+            row.source_url,
+            `Ditto ответил ${statusRes.status} — результат получен встроенным движком`,
+          )) ?? row
+        );
+      }
       const errMsg = `Ditto ${statusRes.status}: ${statusText.slice(0, 300)}`;
       const { data: updated } = await supabase
         .from("clone_jobs")
@@ -215,6 +312,20 @@ export const refreshCloneJob = createServerFn({ method: "POST" })
       filesPath = stored.filesPath;
       if (stored.summary) summary = { files: stored.summary };
     }
+
+    // Ditto держит задачу в очереди — не заставляем пользователя ждать вечно.
+    if (!filesPath && stalled && !isTerminal(status)) {
+      return (
+        (await runBuiltinClone(
+          supabase,
+          userId,
+          row.id,
+          row.source_url,
+          "Ditto не начал обработку — результат получен встроенным движком",
+        )) ?? row
+      );
+    }
+
 
     const { data: updated } = await supabase
       .from("clone_jobs")
@@ -594,6 +705,8 @@ export const refineClone = createServerFn({ method: "POST" })
         omniBaseUrl: settings.omniroute_base_url,
         omniKey: settings.omniroute_api_key,
         openrouterKey: settings.openrouter_api_key || openrouterKey,
+        geminiKey: settings.gemini_api_key || process.env.GEMINI_API_KEY,
+        geminiModel: settings.gemini_model,
         openrouterModel: settings.openrouter_model,
         fallbacks: secondaryProviders(settings),
       } as const;
