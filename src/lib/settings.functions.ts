@@ -11,11 +11,13 @@ export type UserSettings = {
   default_styling: "tailwind" | "css";
   refine_model: string;
   refine_fallback_model: string;
-  refine_provider: "lovable" | "omniroute" | "openrouter";
+  refine_provider: "lovable" | "omniroute" | "openrouter" | "gemini";
+  gemini_api_key: string | null;
+  gemini_model: string | null;
   refine_research: boolean;
   refine_temperature: number;
   refine_budget: number;
-  fallback_provider: "none" | "openrouter" | "omniroute";
+  fallback_provider: "none" | "openrouter" | "omniroute" | "gemini";
   openrouter_api_key: string | null;
   openrouter_model: string | null;
   concept_model: string;
@@ -31,6 +33,8 @@ const DEFAULTS: UserSettings = {
   refine_model: "minimax/minimax-m3:free",
   refine_fallback_model: "nvidia/nemotron-3-super-120b-a12b:free",
   refine_provider: "openrouter",
+  gemini_api_key: null,
+  gemini_model: "gemini-2.5-flash",
   refine_research: true,
   refine_temperature: 0.6,
   refine_budget: 60000,
@@ -51,6 +55,8 @@ function toSettings(data: any): UserSettings {
     default_styling: data.default_styling ?? DEFAULTS.default_styling,
     refine_model: data.refine_model ?? DEFAULTS.refine_model,
     refine_fallback_model: data.refine_fallback_model ?? DEFAULTS.refine_fallback_model,
+    gemini_api_key: data.gemini_api_key ?? null,
+    gemini_model: data.gemini_model ?? DEFAULTS.gemini_model,
     refine_provider: (data.refine_provider ?? DEFAULTS.refine_provider) as UserSettings["refine_provider"],
     refine_research: data.refine_research ?? DEFAULTS.refine_research,
     refine_temperature: Number(data.refine_temperature ?? DEFAULTS.refine_temperature),
@@ -83,11 +89,13 @@ const saveSchema = z.object({
   default_styling: z.enum(["tailwind", "css"]).optional(),
   refine_model: z.string().min(1).max(120).optional(),
   refine_fallback_model: z.string().min(1).max(120).optional(),
-  refine_provider: z.enum(["lovable", "omniroute", "openrouter"]).optional(),
+  refine_provider: z.enum(["lovable", "omniroute", "openrouter", "gemini"]).optional(),
+  gemini_api_key: z.string().max(4000).nullable().optional(),
+  gemini_model: z.string().max(200).nullable().optional(),
   refine_research: z.boolean().optional(),
   refine_temperature: z.number().min(0).max(2).optional(),
   refine_budget: z.number().int().min(10000).max(200000).optional(),
-  fallback_provider: z.enum(["none", "openrouter", "omniroute"]).optional(),
+  fallback_provider: z.enum(["none", "openrouter", "omniroute", "gemini"]).optional(),
   openrouter_api_key: z.string().max(4000).nullable().optional(),
   openrouter_model: z.string().max(200).nullable().optional(),
   concept_model: z.string().min(1).max(200).optional(),
@@ -99,7 +107,7 @@ export const saveUserSettings = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     const payload: any = { user_id: userId, ...data };
-    for (const k of ["omniroute_api_key", "omniroute_base_url", "omniroute_model", "openrouter_api_key", "openrouter_model"]) {
+    for (const k of ["omniroute_api_key", "omniroute_base_url", "omniroute_model", "openrouter_api_key", "openrouter_model", "gemini_api_key", "gemini_model"]) {
       if (payload[k] !== undefined) {
         payload[k] = typeof payload[k] === "string" ? payload[k].trim() || null : null;
       }
@@ -133,6 +141,14 @@ export function secondaryProviders(s: UserSettings) {
       baseUrl: "https://openrouter.ai/api/v1",
       key: s.openrouter_api_key,
       model: s.openrouter_model || "nvidia/nemotron-3-super-120b-a12b:free",
+    });
+  }
+  if (s.fallback_provider === "gemini" && s.gemini_api_key) {
+    out.push({
+      label: "Google Gemini",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+      key: s.gemini_api_key,
+      model: (s.gemini_model || "gemini-2.5-flash").replace(/^google\//, ""),
     });
   }
   if (s.fallback_provider === "omniroute" && s.omniroute_base_url) {
