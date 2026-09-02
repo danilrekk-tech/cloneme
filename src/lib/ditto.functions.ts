@@ -4,6 +4,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { getActiveMcpContext, callMcpTool, loadServersWithTools } from "./mcp.functions";
 import { loadEffectiveSettings, secondaryProviders } from "./settings.functions";
 import { callChat, parseJsonLoose } from "./ai-chat.server";
+import { clonePage } from "./cloner.server";
 
 
 const DITTO_BASE = "https://api.ditto.site/v1";
