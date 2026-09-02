@@ -29,9 +29,7 @@ type FileEntry = {
 type FileMap = Record<string, FileEntry>;
 
 function requireDittoKey(): string {
-  const key = process.env.DITTO_API_KEY;
-  if (!key) throw new Error("DITTO_API_KEY не настроен на сервере");
-  return key;
+  return process.env.DITTO_API_KEY ?? "";
 }
 
 function isTerminal(status: string): boolean {
