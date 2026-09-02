@@ -274,6 +274,8 @@ export type Database = {
           default_mode: string
           default_styling: string
           fallback_provider: string | null
+          gemini_api_key: string | null
+          gemini_model: string | null
           omniroute_api_key: string | null
           omniroute_base_url: string | null
           omniroute_model: string | null
@@ -295,6 +297,8 @@ export type Database = {
           default_mode?: string
           default_styling?: string
           fallback_provider?: string | null
+          gemini_api_key?: string | null
+          gemini_model?: string | null
           omniroute_api_key?: string | null
           omniroute_base_url?: string | null
           omniroute_model?: string | null
@@ -316,6 +320,8 @@ export type Database = {
           default_mode?: string
           default_styling?: string
           fallback_provider?: string | null
+          gemini_api_key?: string | null
+          gemini_model?: string | null
           omniroute_api_key?: string | null
           omniroute_base_url?: string | null
           omniroute_model?: string | null
