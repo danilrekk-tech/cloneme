@@ -23,8 +23,10 @@ export type SecondaryProvider = {
 };
 
 export type ChatProviderConfig = {
-  provider: "lovable" | "omniroute" | "openrouter";
+  provider: "lovable" | "omniroute" | "openrouter" | "gemini";
   lovableKey?: string;
+  geminiKey?: string | null;
+  geminiModel?: string | null;
   omniBaseUrl?: string | null;
   omniKey?: string | null;
   openrouterKey?: string | null;
@@ -85,6 +87,16 @@ export function toOpenRouterModel(model: string, preferred?: string | null): str
   return preferred || OPENROUTER_FREE_CHAIN[0];
 }
 
+export const GEMINI_URL =
+  "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+
+/** Приводит id модели к виду, который понимает прямой API Google. */
+export function toGeminiModel(model: string, preferred?: string | null): string {
+  const m = (model || "").replace(/^google\//, "");
+  if (/^gemini/i.test(m)) return m;
+  return (preferred || "gemini-2.5-flash").replace(/^google\//, "");
+}
+
 function endpointFor(cfg: ChatProviderConfig): { url: string; headers: Record<string, string> } {
   if (cfg.provider === "openrouter") {
     const key = cfg.openrouterKey;
@@ -100,6 +112,18 @@ function endpointFor(cfg: ChatProviderConfig): { url: string; headers: Record<st
         Authorization: `Bearer ${key}`,
         "HTTP-Referer": "https://cloneme.lovable.app",
         "X-Title": "Clone Studio",
+      },
+    };
+  }
+  if (cfg.provider === "gemini") {
+    if (!cfg.geminiKey) {
+      throw new Error("Не задан ключ Google Gemini. Добавьте его в Настройках → Провайдер ИИ.");
+    }
+    return {
+      url: GEMINI_URL,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${cfg.geminiKey}`,
       },
     };
   }
@@ -195,13 +219,23 @@ export async function callChat(cfg: ChatProviderConfig, opts: ChatOptions): Prom
   const attempts: Attempt[] = [];
   const primary = endpointFor(cfg);
   const primaryLabel =
-    cfg.provider === "omniroute" ? "Omniroute" : cfg.provider === "openrouter" ? "OpenRouter" : "Lovable AI";
+    cfg.provider === "omniroute"
+      ? "Omniroute"
+      : cfg.provider === "openrouter"
+        ? "OpenRouter"
+        : cfg.provider === "gemini"
+          ? "Google Gemini"
+          : "Lovable AI";
 
   const models: string[] = [];
   const push = (m?: string | null) => {
     if (m && !models.includes(m)) models.push(m);
   };
-  if (cfg.provider === "openrouter") {
+  if (cfg.provider === "gemini") {
+    push(toGeminiModel(opts.model, cfg.geminiModel));
+    push(toGeminiModel(opts.fallbackModel ?? "", cfg.geminiModel));
+    ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"].forEach(push);
+  } else if (cfg.provider === "openrouter") {
     push(toOpenRouterModel(opts.model, cfg.openrouterModel));
     push(toOpenRouterModel(opts.fallbackModel ?? "", cfg.openrouterModel));
     OPENROUTER_FREE_CHAIN.forEach(push);
@@ -310,7 +344,9 @@ export async function generateImage(
   // OpenRouter не даёт бесплатной генерации изображений — для картинок
   // используем Lovable AI, если ключ доступен.
   const imageCfg: ChatProviderConfig =
-    cfg.provider === "openrouter" && cfg.lovableKey ? { ...cfg, provider: "lovable" } : cfg;
+    (cfg.provider === "openrouter" || cfg.provider === "gemini") && cfg.lovableKey
+      ? { ...cfg, provider: "lovable" }
+      : cfg;
   const primary = endpointFor(imageCfg);
   const primaryLabel =
     imageCfg.provider === "omniroute"
