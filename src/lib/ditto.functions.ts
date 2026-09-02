@@ -244,7 +244,7 @@ export const refreshCloneJob = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((raw: unknown) => z.object({ id: z.string().uuid() }).parse(raw))
   .handler(async ({ data, context }) => {
-    const key = requireDittoKey();
+    const key = process.env.DITTO_API_KEY ?? null;
     const { supabase, userId } = context;
 
     const { data: row, error } = await supabase
@@ -254,13 +254,41 @@ export const refreshCloneJob = createServerFn({ method: "POST" })
       .eq("user_id", userId)
       .single();
     if (error || !row) throw new Error("Задача не найдена");
-    if (!row.ditto_job_id) return row;
+
+    const ageMs = Date.now() - new Date(row.created_at ?? Date.now()).getTime();
+    const stalled = ageMs > 90_000 && !row.files_path && !isTerminal(row.status ?? "");
+
+    if (!row.ditto_job_id || !key) {
+      if (stalled) {
+        return (
+          (await runBuiltinClone(
+            supabase,
+            userId,
+            row.id,
+            row.source_url,
+            "Задача зависла — результат получен встроенным движком",
+          )) ?? row
+        );
+      }
+      return row;
+    }
 
     const statusRes = await fetch(`${DITTO_BASE}/clones/${encodeURIComponent(row.ditto_job_id)}`, {
       headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
     });
     const statusText = await statusRes.text();
     if (!statusRes.ok) {
+      if (stalled) {
+        return (
+          (await runBuiltinClone(
+            supabase,
+            userId,
+            row.id,
+            row.source_url,
+            `Ditto ответил ${statusRes.status} — результат получен встроенным движком`,
+          )) ?? row
+        );
+      }
       const errMsg = `Ditto ${statusRes.status}: ${statusText.slice(0, 300)}`;
       const { data: updated } = await supabase
         .from("clone_jobs")
@@ -286,6 +314,20 @@ export const refreshCloneJob = createServerFn({ method: "POST" })
       filesPath = stored.filesPath;
       if (stored.summary) summary = { files: stored.summary };
     }
+
+    // Ditto держит задачу в очереди — не заставляем пользователя ждать вечно.
+    if (!filesPath && stalled && !isTerminal(status)) {
+      return (
+        (await runBuiltinClone(
+          supabase,
+          userId,
+          row.id,
+          row.source_url,
+          "Ditto не начал обработку — результат получен встроенным движком",
+        )) ?? row
+      );
+    }
+
 
     const { data: updated } = await supabase
       .from("clone_jobs")
