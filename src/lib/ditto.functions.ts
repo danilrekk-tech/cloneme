@@ -17,6 +17,7 @@ const createSchema = z.object({
   mode: z.enum(["single", "multi"]).default("single"),
   framework: z.enum(["next", "vite"]).default("next"),
   styling: z.enum(["tailwind", "css"]).default("tailwind"),
+  engine: z.enum(["auto", "ditto", "builtin"]).default("auto"),
 });
 
 type FileEntry = {
