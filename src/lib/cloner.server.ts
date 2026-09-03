@@ -20,8 +20,8 @@ const UA =
 const MAX_CSS_FILES = 40;
 const MAX_CSS_BYTES = 3_000_000;
 const MAX_ASSETS = 260;
-const MAX_ASSET_BYTES = 2_500_000; // на один файл
-const MAX_TOTAL_ASSET_BYTES = 26_000_000;
+const MAX_ASSET_BYTES = 1_500_000; // на один файл
+const MAX_TOTAL_ASSET_BYTES = 12_000_000;
 
 function textFile(content: string): ClonedFile {
   return { type: "text", content, bytes: new TextEncoder().encode(content).length };
