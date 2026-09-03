@@ -127,6 +127,7 @@ function AppPage() {
   const [mode, setMode] = useState<"single" | "multi">("single");
   const [framework, setFramework] = useState<"next" | "vite">("next");
   const [styling, setStyling] = useState<"tailwind" | "css">("tailwind");
+  const [engine, setEngine] = useState<"auto" | "ditto" | "builtin">("auto");
 
   // sync from user settings once loaded
   useEffect(() => {
@@ -210,6 +211,7 @@ function AppPage() {
       mode: "single" | "multi";
       framework: "next" | "vite";
       styling: "tailwind" | "css";
+      engine: "auto" | "ditto" | "builtin";
     }) => createFn({ data: input }),
     onSuccess: () => {
       toast.success("Задача на клонирование отправлена");
@@ -299,7 +301,7 @@ function AppPage() {
       return;
     }
     setUrlError(null);
-    createMut.mutate({ url: trimmed, mode, framework, styling });
+    createMut.mutate({ url: trimmed, mode, framework, styling, engine });
   }
 
   const jobs = (jobsQuery.data as Job[] | undefined) ?? [];
@@ -390,6 +392,27 @@ function AppPage() {
                 ) : null}
               </div>
 
+              <div className="space-y-2">
+                <Label>Метод клонирования</Label>
+                <Select value={engine} onValueChange={(v) => setEngine(v as any)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Авто — Ditto, при сбое альтернативный</SelectItem>
+                    <SelectItem value="ditto">Только Ditto API</SelectItem>
+                    <SelectItem value="builtin">Альтернативный (встроенный движок)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {engine === "ditto"
+                    ? "Задача уйдёт в Ditto; если сервис не отвечает, задача завершится ошибкой."
+                    : engine === "builtin"
+                      ? "Страница будет скачана нашим движком: HTML, стили, шрифты и изображения вшиваются в один файл."
+                      : "Сначала Ditto, а если он недоступен или зависает — автоматически встроенный движок."}
+                </p>
+              </div>
+
               <div className="rounded-lg border border-dashed border-border">
                 <button
                   type="button"
@@ -460,30 +483,6 @@ function AppPage() {
             </form>
           </CardContent>
         </Card>
-
-        {/* MCP context indicator */}
-        <div className="fade-up-delay-1 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3 text-xs">
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Plug className="h-3.5 w-3.5" />
-            {activeMcp.length === 0 ? (
-              <span>MCP-агенты не подключены — AI-доработка сработает и без них.</span>
-            ) : (
-              <span>
-                Подключено <span className="font-medium text-foreground">{activeMcp.length}</span>{" "}
-                MCP-серверов ·{" "}
-                <span className="font-medium text-foreground">
-                  {activeMcp.reduce((s, r) => s + (r.tools?.length ?? 0), 0)}
-                </span>{" "}
-                инструментов. Выберите нужные при запуске AI-доработки.
-              </span>
-            )}
-          </div>
-          <Link to="/settings">
-            <Button size="sm" variant="ghost">
-              Управление в настройках →
-            </Button>
-          </Link>
-        </div>
 
         <section className="mt-10">
           <div className="mb-4 flex items-center justify-between">
