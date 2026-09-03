@@ -146,7 +146,35 @@ export const createCloneJob = createServerFn({ method: "POST" })
 
     const builtin = (note: string) => runBuiltinClone(supabase, userId, row.id, data.url, note);
 
-    if (!key) return (await builtin("DITTO_API_KEY не настроен — использован встроенный движок")) ?? row;
+    if (data.engine === "builtin") {
+      return (await builtin("Выбран альтернативный (встроенный) движок")) ?? row;
+    }
+
+    if (!key) {
+      if (data.engine === "ditto") {
+        const { data: updated } = await supabase
+          .from("clone_jobs")
+          .update({ status: "failed", error: "Ditto недоступен: не настроен API-ключ" })
+          .eq("id", row.id)
+          .select()
+          .single();
+        return updated ?? row;
+      }
+      return (await builtin("DITTO_API_KEY не настроен — использован встроенный движок")) ?? row;
+    }
+
+    const fail = async (msg: string) => {
+      const { data: updated } = await supabase
+        .from("clone_jobs")
+        .update({ status: "failed", error: msg })
+        .eq("id", row.id)
+        .select()
+        .single();
+      return updated ?? row;
+    };
+    const onDittoProblem = (msg: string, note: string) =>
+      data.engine === "ditto" ? fail(msg) : builtin(note);
+
 
     let res: Response;
     try {
