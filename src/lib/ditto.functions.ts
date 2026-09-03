@@ -187,12 +187,22 @@ export const createCloneJob = createServerFn({ method: "POST" })
         }),
       });
     } catch (e: any) {
-      return (await builtin(`Ditto недоступен (${String(e?.message ?? e).slice(0, 120)})`)) ?? row;
+      return (
+        (await onDittoProblem(
+          `Ditto недоступен: ${String(e?.message ?? e).slice(0, 200)}`,
+          `Ditto недоступен (${String(e?.message ?? e).slice(0, 120)})`,
+        )) ?? row
+      );
     }
 
     const text = await res.text();
     if (!res.ok) {
-      return (await builtin(`Ditto ответил ${res.status} — использован встроенный движок`)) ?? row;
+      return (
+        (await onDittoProblem(
+          `Ditto ответил ${res.status}: ${text.slice(0, 200)}`,
+          `Ditto ответил ${res.status} — использован встроенный движок`,
+        )) ?? row
+      );
     }
 
     let body: any = {};
@@ -231,6 +241,15 @@ export const createCloneJob = createServerFn({ method: "POST" })
         } catch {
           break;
         }
+      }
+      if (data.engine === "ditto") {
+        const { data: updated } = await supabase
+          .from("clone_jobs")
+          .update({ ditto_job_id: jobId, status: "queued", last_event: { status: "queued" } })
+          .eq("id", row.id)
+          .select()
+          .single();
+        return updated ?? row;
       }
       return (
         (await builtin("Ditto не начал обработку — страница склонирована встроенным движком")) ?? row
