@@ -138,16 +138,15 @@ export const createCloneJob = createServerFn({ method: "POST" })
         mode: data.mode,
         framework: data.framework,
         styling: data.styling,
-        status: "submitting",
+        status: "queued",
+        last_event: { engine: data.engine, phase: "queued" },
       })
       .select()
       .single();
     if (insertErr || !row) throw new Error(insertErr?.message ?? "Не удалось создать задачу");
 
-    const builtin = (note: string) => runBuiltinClone(supabase, userId, row.id, data.url, note);
-
     if (data.engine === "builtin") {
-      return (await builtin("Выбран альтернативный (встроенный) движок")) ?? row;
+      return row;
     }
 
     if (!key) {
@@ -160,7 +159,16 @@ export const createCloneJob = createServerFn({ method: "POST" })
           .single();
         return updated ?? row;
       }
-      return (await builtin("DITTO_API_KEY не настроен — использован встроенный движок")) ?? row;
+      const { data: updated } = await supabase
+        .from("clone_jobs")
+        .update({
+          status: "queued",
+          last_event: { engine: "builtin", phase: "queued", message: "Ditto недоступен — выбран встроенный движок" },
+        })
+        .eq("id", row.id)
+        .select()
+        .single();
+      return updated ?? row;
     }
 
     const fail = async (msg: string) => {
@@ -172,8 +180,16 @@ export const createCloneJob = createServerFn({ method: "POST" })
         .single();
       return updated ?? row;
     };
-    const onDittoProblem = (msg: string, note: string) =>
-      data.engine === "ditto" ? fail(msg) : builtin(note);
+    const onDittoProblem = async (msg: string, note: string) => {
+      if (data.engine === "ditto") return fail(msg);
+      const { data: updated } = await supabase
+        .from("clone_jobs")
+        .update({ status: "queued", last_event: { engine: "builtin", phase: "queued", message: note } })
+        .eq("id", row.id)
+        .select()
+        .single();
+      return updated ?? row;
+    };
 
 
     let res: Response;
@@ -219,50 +235,14 @@ export const createCloneJob = createServerFn({ method: "POST" })
       filesPath = await uploadFilesJson(supabase, userId, row.id, body.files as FileMap);
     }
 
-    // Ditto часто оставляет задачу в очереди навсегда — ждём немного и,
-    // если прогресса нет, клонируем сами, чтобы пользователь получил результат.
-    if (jobId && !filesPath) {
-      for (let i = 0; i < 4; i++) {
-        await new Promise((r) => setTimeout(r, 4000));
-        try {
-          const st = await fetch(`${DITTO_BASE}/clones/${encodeURIComponent(jobId)}`, {
-            headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
-          });
-          const meta: any = st.ok ? await st.json() : {};
-          if (meta.status && meta.status !== "queued") {
-            const { data: updated } = await supabase
-              .from("clone_jobs")
-              .update({ ditto_job_id: jobId, status: meta.status, last_event: meta })
-              .eq("id", row.id)
-              .select()
-              .single();
-            return updated ?? row;
-          }
-        } catch {
-          break;
-        }
-      }
-      if (data.engine === "ditto") {
-        const { data: updated } = await supabase
-          .from("clone_jobs")
-          .update({ ditto_job_id: jobId, status: "queued", last_event: { status: "queued" } })
-          .eq("id", row.id)
-          .select()
-          .single();
-        return updated ?? row;
-      }
-      return (
-        (await builtin("Ditto не начал обработку — страница склонирована встроенным движком")) ?? row
-      );
-    }
-
     const { data: updated } = await supabase
       .from("clone_jobs")
       .update({
         ditto_job_id: jobId,
-        status: filesPath ? "succeeded" : status,
+        status: filesPath ? "succeeded" : status === "unknown" ? "queued" : status,
         files_path: filesPath,
         result: summary ? { files: summary } : null,
+        last_event: { ...body, engine: data.engine, phase: filesPath ? "complete" : "remote" },
       })
       .eq("id", row.id)
       .select()
@@ -303,16 +283,25 @@ export const refreshCloneJob = createServerFn({ method: "POST" })
 
     const ageMs = Date.now() - new Date(row.created_at ?? Date.now()).getTime();
     const stalled = ageMs > 90_000 && !row.files_path && !isTerminal(row.status ?? "");
+    const requestedEngine = row.last_event?.engine === "ditto" || row.last_event?.engine === "builtin"
+      ? row.last_event.engine
+      : "auto";
 
     if (!row.ditto_job_id || !key) {
-      if (stalled) {
+      if (requestedEngine === "builtin" || requestedEngine === "auto") {
+        await supabase
+          .from("clone_jobs")
+          .update({ status: "processing", last_event: { ...row.last_event, engine: "builtin", phase: "capturing" } })
+          .eq("id", row.id);
         return (
           (await runBuiltinClone(
             supabase,
             userId,
             row.id,
             row.source_url,
-            "Задача зависла — результат получен встроенным движком",
+            requestedEngine === "builtin"
+              ? "Выбран альтернативный (встроенный) движок"
+              : "Ditto недоступен — результат получен встроенным движком",
           )) ?? row
         );
       }
@@ -362,7 +351,7 @@ export const refreshCloneJob = createServerFn({ method: "POST" })
     }
 
     // Ditto держит задачу в очереди — не заставляем пользователя ждать вечно.
-    if (!filesPath && stalled && !isTerminal(status)) {
+    if (!filesPath && stalled && !isTerminal(status) && requestedEngine === "auto") {
       return (
         (await runBuiltinClone(
           supabase,

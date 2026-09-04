@@ -145,10 +145,12 @@ async function inlineCssAssets(css: string, cssUrl: string, inliner: AssetInline
     if (a) targets.add(a);
   }
   const map = new Map<string, string>();
-  for (const t of targets) {
-    const d = await inliner.inline(t);
-    if (d) map.set(t, d);
-  }
+  await Promise.all(
+    Array.from(targets, async (t) => {
+      const d = await inliner.inline(t);
+      if (d) map.set(t, d);
+    }),
+  );
   return css.replace(re, (full, _q, raw) => {
     const t = String(raw).trim();
     if (/^data:|^about:/i.test(t)) return full;
