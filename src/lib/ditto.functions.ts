@@ -283,15 +283,18 @@ export const refreshCloneJob = createServerFn({ method: "POST" })
 
     const ageMs = Date.now() - new Date(row.created_at ?? Date.now()).getTime();
     const stalled = ageMs > 90_000 && !row.files_path && !isTerminal(row.status ?? "");
-    const requestedEngine = row.last_event?.engine === "ditto" || row.last_event?.engine === "builtin"
-      ? row.last_event.engine
+    const lastEvent = row.last_event && typeof row.last_event === "object" && !Array.isArray(row.last_event)
+      ? row.last_event as Record<string, unknown>
+      : {};
+    const requestedEngine = lastEvent.engine === "ditto" || lastEvent.engine === "builtin"
+      ? lastEvent.engine
       : "auto";
 
     if (!row.ditto_job_id || !key) {
       if (requestedEngine === "builtin" || requestedEngine === "auto") {
         await supabase
           .from("clone_jobs")
-          .update({ status: "processing", last_event: { ...row.last_event, engine: "builtin", phase: "capturing" } })
+          .update({ status: "processing", last_event: { ...lastEvent, engine: "builtin", phase: "capturing" } })
           .eq("id", row.id);
         return (
           (await runBuiltinClone(
