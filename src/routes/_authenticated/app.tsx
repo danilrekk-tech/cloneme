@@ -274,12 +274,14 @@ function AppPage() {
   useEffect(() => {
     const jobs = (jobsQuery.data as Job[] | undefined) ?? [];
     const active = jobs.filter(
-      (j) => j.ditto_job_id && !["done", "succeeded", "failed", "error", "cancelled"].includes(j.status),
+      (j) => !["done", "succeeded", "failed", "error", "cancelled"].includes(j.status),
     );
     if (!active.length) return;
-    const t = setInterval(() => {
-      active.forEach((j) => refreshMut.mutate(j.id));
-    }, 6000);
+    const run = () => active.forEach((j) => {
+      if (!refreshMut.isPending) refreshMut.mutate(j.id);
+    });
+    run();
+    const t = setInterval(run, 6000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobsQuery.data]);
