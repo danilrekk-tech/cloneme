@@ -366,6 +366,42 @@ export const refreshCloneJob = createServerFn({ method: "POST" })
       );
     }
 
+    // Режим «только Ditto»: честно объясняем причину зависания и не молчим.
+    if (!filesPath && !isTerminal(status) && requestedEngine === "ditto") {
+      if (ageMs > 180_000) {
+        const { data: failed } = await supabase
+          .from("clone_jobs")
+          .update({
+            status: "failed",
+            last_event: meta,
+            error:
+              "Ditto принял задачу, но так и не начал её обрабатывать (статус «queued» более 3 минут). " +
+              "Сейчас на стороне api.ditto.site не работают воркеры. Запустите клонирование с методом «Альтернативный движок» или «Авто».",
+          })
+          .eq("id", row.id)
+          .select()
+          .single();
+        return failed ?? row;
+      }
+      if (ageMs > 45_000) {
+        const { data: warned } = await supabase
+          .from("clone_jobs")
+          .update({
+            status,
+            last_event: meta,
+            error:
+              `Ditto держит задачу в статусе «${status}» ${Math.round(ageMs / 1000)} с и не начинает обработку. ` +
+              "Ждём ещё немного, затем задача будет отмечена как неуспешная.",
+          })
+          .eq("id", row.id)
+          .select()
+          .single();
+        return warned ?? row;
+      }
+    }
+
+
+
 
     const { data: updated } = await supabase
       .from("clone_jobs")

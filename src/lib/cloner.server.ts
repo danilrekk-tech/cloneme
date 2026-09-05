@@ -256,22 +256,19 @@ export async function clonePage(pageUrl: string): Promise<ClonedFileMap> {
     }
   }
 
-  // 2. Скрипты -> инлайн исходного кода
+  // 2. Скрипты: оставляем абсолютные ссылки — инлайн ломает исходный код
   const scriptTags = out.match(/<script\b[^>]*>/gi) ?? [];
+  const seenScripts = new Set<string>();
   for (const tag of scriptTags) {
+    if (seenScripts.has(tag)) continue;
+    seenScripts.add(tag);
     const src = attrOf(tag, "src");
     if (!src) continue;
     const url = abs(src, base);
     if (!url) continue;
-    try {
-      const code = await fetchText(url, 15_000, base);
-      if (code.length > 1_500_000) throw new Error("too big");
-      const cleaned = code.replace(/<\/script/gi, "<\\/script");
-      out = out.replace(tag, `<script data-src="${url}">${cleaned}\n//`);
-    } catch {
-      out = out.replace(tag, setAttr(tag, "src", url));
-    }
+    out = out.split(tag).join(setAttr(tag, "src", url));
   }
+
 
   // 3. Картинки, srcset, video/source, inline style="...url(...)"
   const mediaTags = out.match(/<(?:img|source|video|audio|embed|iframe)\b[^>]*>/gi) ?? [];

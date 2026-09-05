@@ -73,6 +73,41 @@ export type Database = {
           },
         ]
       }
+      clone_edits: {
+        Row: {
+          created_at: string
+          id: string
+          job_id: string
+          patch: Json
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          job_id: string
+          patch?: Json
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          job_id?: string
+          patch?: Json
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clone_edits_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: true
+            referencedRelation: "clone_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       clone_jobs: {
         Row: {
           active_refinement_id: string | null
