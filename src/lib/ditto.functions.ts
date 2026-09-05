@@ -390,7 +390,7 @@ export const refreshCloneJob = createServerFn({ method: "POST" })
             status,
             last_event: meta,
             error:
-              `Ditto держит задачу в статусе «${status}" ${Math.round(ageMs / 1000)} с и не начинает обработку. ` +
+              `Ditto держит задачу в статусе «${status}» ${Math.round(ageMs / 1000)} с и не начинает обработку. ` +
               "Ждём ещё немного, затем задача будет отмечена как неуспешная.",
           })
           .eq("id", row.id)
